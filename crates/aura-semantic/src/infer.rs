@@ -168,7 +168,12 @@ impl InferCtx {
             return self.bind_var(v, &b);
         }
         if let Type::Var(v) = b {
-            return self.bind_var(v, &a);
+            // `b` is the *found* side — `bind_var` reports the var as
+            // `expected`, so swap to keep the diagnostic direction.
+            return self.bind_var(v, &a).map_err(|mut e| {
+                std::mem::swap(&mut e.expected, &mut e.found);
+                e
+            });
         }
         match (&a, &b) {
             _ if a == b => Ok(()),

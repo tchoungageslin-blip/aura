@@ -388,3 +388,32 @@ pub unsafe extern "C" fn aura_str_eq(
     }
     i32::from(unsafe { memcmp(l.cast(), r.cast(), l_len) } == 0)
 }
+
+/// Concatenate two `str` payloads into a fresh process-heap buffer —
+/// the backend of `str + str`. Returns the new buffer; the caller
+/// computes the result length as `l_len + r_len`.
+///
+/// # Safety
+/// `l`/`r` must be valid for `l_len`/`r_len` bytes (or null when the
+/// length is zero). The returned pointer is `aura_rt_alloc`-owned.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_str_concat(
+    l: *const u8,
+    l_len: usize,
+    r: *const u8,
+    r_len: usize,
+) -> *mut u8 {
+    let total = l_len.wrapping_add(r_len);
+    let buf = aura_rt_alloc(total);
+    if buf.is_null() {
+        return buf;
+    }
+    if l_len != 0 {
+        unsafe { memcpy(buf.cast(), l.cast(), l_len) };
+    }
+    if r_len != 0 {
+        unsafe { memcpy(buf.add(l_len).cast(), r.cast(), r_len) };
+    }
+    buf
+}

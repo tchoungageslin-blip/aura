@@ -462,3 +462,26 @@ fn user_def_shadows_builtin() {
     let src = "fn println(s: str) -> i64 { 7 }\nfn main() -> i64 { println(\"x\") }";
     assert!(diags(src).is_empty(), "{:?}", diags(src));
 }
+
+#[test]
+fn str_add_concat_clean() {
+    let src = "fn main() -> i64 { let s = \"a\" + \"b\"\n if s == \"ab\" { 1 } else { 0 } }";
+    assert!(diags(src).is_empty(), "{:?}", diags(src));
+}
+
+#[test]
+fn str_add_rhs_mismatch() {
+    assert_has(
+        "fn main() -> i64 { let s = \"a\" + 1\n 0 }",
+        codes::SEM_TYPE_MISMATCH,
+    );
+}
+
+#[test]
+fn str_sub_rejected() {
+    // `+` is the only arithmetic op `str` supports.
+    assert_has(
+        "fn main() -> i64 { let s = \"a\" - \"b\"\n 0 }",
+        codes::SEM_TYPE_MISMATCH,
+    );
+}

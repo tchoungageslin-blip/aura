@@ -43,8 +43,10 @@ struct FnTable {
     fns: FxHashMap<u32, FuncId>,
     /// `FuncId` per `(extern-block idx, fn idx)` for extern fns.
     externs: FxHashMap<(u32, u32), FuncId>,
-    /// Runtime `aura_str_eq` helper — imported unconditionally.
+    /// Runtime `aura_str_eq`/`aura_str_concat` helpers — imported
+    /// unconditionally; unreferenced imports are dropped.
     str_eq: FuncId,
+    str_concat: FuncId,
     /// Runtime helpers for prelude builtins (`aura_rt_print`, …) —
     /// imported unconditionally; unreferenced imports are dropped.
     builtins: FxHashMap<BuiltinFn, FuncId>,
@@ -74,46 +76,16 @@ pub fn emit_object(items: &FileItems, mirs: &[(u32, MirBody)]) -> Result<Emitted
     let mut module = ObjectModule::new(builder);
 
     // Pass 1 — declare every callable symbol before bodies reference them.
-    let str_eq = declare_str_eq(&mut module, ptr, call_conv)?;
+    let (str_eq, str_concat) = declare_str_rt(&mut module, ptr, call_conv)?;
     let builtins = declare_builtins(&mut module, ptr, call_conv)?;
     let mut table = FnTable {
         fns: FxHashMap::default(),
         externs: FxHashMap::default(),
         str_eq,
+        str_concat,
         builtins,
     };
-    for (i, sig) in items.iter() {
-        match sig {
-            ItemSig::Fn { name, .. } => {
-                let Some(clif_sig) = fn_sig(items, i, ptr, call_conv) else {
-                    continue; // body-less or broken signature — typeck reported
-                };
-                let linkage = if name == "main" {
-                    Linkage::Export
-                } else {
-                    Linkage::Local
-                };
-                let id = module
-                    .declare_function(name, linkage, &clif_sig)
-                    .map_err(|e| internal(&format!("declare {name}: {e}")))?;
-                table.fns.insert(i, id);
-            }
-            ItemSig::ExternBlock { fns, .. } => {
-                for (f, sig) in fns.iter().enumerate() {
-                    let Some(clif_sig) = extern_sig(items, sig, ptr, call_conv) else {
-                        continue;
-                    };
-                    let id = module
-                        .declare_function(&sig.name, Linkage::Import, &clif_sig)
-                        .map_err(|e| internal(&format!("declare {}: {e}", sig.name)))?;
-                    table
-                        .externs
-                        .insert((i, u32::try_from(f).unwrap_or(u32::MAX)), id);
-                }
-            }
-            _ => {}
-        }
-    }
+    declare_items(items, &mut module, ptr, call_conv, &mut table)?;
 
     // Struct layouts for every struct item (None → not a struct).
     let layouts: Vec<Option<Layout>> = items
@@ -173,20 +145,71 @@ fn internal(msg: &str) -> Vec<Diagnostic> {
     )]
 }
 
-/// Import `aura_str_eq(l_ptr, l_len, r_ptr, r_len) -> i32`. Declared
-/// unconditionally — the unreferenced import is dropped from the object
-/// when no `str` comparison is emitted.
-fn declare_str_eq(
+/// Pass-1 declaration of every Aura fn (`main` exported, others local)
+/// and extern fn (imported) into the object module's `table`.
+fn declare_items(
+    items: &FileItems,
     module: &mut ObjectModule,
     ptr: cranelift_codegen::ir::Type,
     cc: cranelift_codegen::isa::CallConv,
-) -> Result<FuncId, Vec<Diagnostic>> {
+    table: &mut FnTable,
+) -> Result<(), Vec<Diagnostic>> {
+    for (i, sig) in items.iter() {
+        match sig {
+            ItemSig::Fn { name, .. } => {
+                let Some(clif_sig) = fn_sig(items, i, ptr, cc) else {
+                    continue; // body-less or broken signature — typeck reported
+                };
+                let linkage = if name == "main" {
+                    Linkage::Export
+                } else {
+                    Linkage::Local
+                };
+                let id = module
+                    .declare_function(name, linkage, &clif_sig)
+                    .map_err(|e| internal(&format!("declare {name}: {e}")))?;
+                table.fns.insert(i, id);
+            }
+            ItemSig::ExternBlock { fns, .. } => {
+                for (f, sig) in fns.iter().enumerate() {
+                    let Some(clif_sig) = extern_sig(items, sig, ptr, cc) else {
+                        continue;
+                    };
+                    let id = module
+                        .declare_function(&sig.name, Linkage::Import, &clif_sig)
+                        .map_err(|e| internal(&format!("declare {}: {e}", sig.name)))?;
+                    table
+                        .externs
+                        .insert((i, u32::try_from(f).unwrap_or(u32::MAX)), id);
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Import the runtime string helpers: `aura_str_eq(l_ptr, l_len,
+/// r_ptr, r_len) -> i32` and `aura_str_concat(l_ptr, l_len, r_ptr,
+/// r_len) -> ptr`. Declared unconditionally — unreferenced imports are
+/// dropped from the object.
+fn declare_str_rt(
+    module: &mut ObjectModule,
+    ptr: cranelift_codegen::ir::Type,
+    cc: cranelift_codegen::isa::CallConv,
+) -> Result<(FuncId, FuncId), Vec<Diagnostic>> {
     let mut sig = Signature::new(cc);
     sig.params.extend([AbiParam::new(ptr); 4]);
     sig.returns.push(AbiParam::new(types::I32));
-    module
+    let eq = module
         .declare_function("aura_str_eq", Linkage::Import, &sig)
-        .map_err(|e| internal(&format!("declare aura_str_eq: {e}")))
+        .map_err(|e| internal(&format!("declare aura_str_eq: {e}")))?;
+    sig.returns.pop();
+    sig.returns.push(AbiParam::new(ptr));
+    let concat = module
+        .declare_function("aura_str_concat", Linkage::Import, &sig)
+        .map_err(|e| internal(&format!("declare aura_str_concat: {e}")))?;
+    Ok((eq, concat))
 }
 
 /// Import every `aura_rt_*` builtin helper — `print`-family takes
@@ -477,11 +500,17 @@ impl FnGen<'_, '_> {
                 self.store(place, r);
             }
             Rvalue::Binary(op, l, r) => {
-                let lv = self.operand_val(l);
-                let rv2 = self.operand_val(r);
                 let ty = self.operand_ty(l);
-                let v = self.binop(*op, &ty, lv, rv2);
-                self.store(place, v);
+                if matches!(ty, Type::Str) && matches!(op, BinOp::Add) {
+                    // `str + str` — heap-concatenated fresh string into
+                    // the destination's `{ptr, len}` storage.
+                    self.str_concat(place, l, r);
+                } else {
+                    let lv = self.operand_val(l);
+                    let rv2 = self.operand_val(r);
+                    let v = self.binop(*op, &ty, lv, rv2);
+                    self.store(place, v);
+                }
             }
             Rvalue::Call(callee, args) => self.call(place, *callee, args),
             Rvalue::StructLit { fields, .. } => {
@@ -587,6 +616,37 @@ impl FnGen<'_, '_> {
             IntCC::NotEqual
         };
         self.b.ins().icmp(cc, eq, zero)
+    }
+
+    /// `l + r` on `str` — `aura_str_concat` allocates and returns the new
+    /// buffer; `len` is `l.len + r.len`. Stored into `place` fieldwise.
+    fn str_concat(&mut self, place: &Place, l: &Operand, r: &Operand) {
+        let len_off = i32::try_from(self.ptr.bytes()).unwrap_or(i32::MAX);
+        let la = self.operand_addr(l);
+        let lp = self.b.ins().load(self.ptr, MemFlagsData::trusted(), la, 0);
+        let ll = self
+            .b
+            .ins()
+            .load(self.ptr, MemFlagsData::trusted(), la, len_off);
+        let ra = self.operand_addr(r);
+        let rp = self.b.ins().load(self.ptr, MemFlagsData::trusted(), ra, 0);
+        let rl = self
+            .b
+            .ins()
+            .load(self.ptr, MemFlagsData::trusted(), ra, len_off);
+        let fref = self
+            .module
+            .declare_func_in_func(self.table.str_concat, self.b.func);
+        let call = self.b.ins().call(fref, &[lp, ll, rp, rl]);
+        let new_ptr = self.b.inst_results(call)[0];
+        let new_len = self.b.ins().iadd(ll, rl);
+        let base = self.place_addr(place);
+        self.b
+            .ins()
+            .store(MemFlagsData::trusted(), new_ptr, base, 0);
+        self.b
+            .ins()
+            .store(MemFlagsData::trusted(), new_len, base, len_off);
     }
 
     fn call(&mut self, dest: &Place, callee: Callee, args: &[Operand]) {

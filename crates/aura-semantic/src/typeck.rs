@@ -442,6 +442,10 @@ impl Checker<'_> {
                 if self.is_numeric(&l) {
                     self.check(rhs, &l);
                     l
+                } else if matches!(l, Type::Str) && op == BinOp::Add {
+                    // `str + str` concatenates into a fresh heap string.
+                    self.check(rhs, &Type::Str);
+                    Type::Str
                 } else {
                     // Non-numeric lhs poisons the op — still visit rhs for
                     // its own diagnostics, but skip the operand unification

@@ -162,3 +162,16 @@ fn builtin_print_imports_aura_rt_println() {
         "object must import aura_rt_println"
     );
 }
+
+#[test]
+fn str_add_imports_aura_str_concat() {
+    let out =
+        compile("fn main() -> i64 { let s = \"a\" + \"b\"\n if s == \"ab\" { 1 } else { 0 } }");
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    let obj = out.object.expect("object expected");
+    assert!(
+        obj.windows(b"aura_str_concat".len())
+            .any(|w| w == b"aura_str_concat"),
+        "object must import aura_str_concat"
+    );
+}

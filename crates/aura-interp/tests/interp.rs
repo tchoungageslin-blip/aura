@@ -230,3 +230,9 @@ fn builtin_println_returns_unit() {
     // and the call must produce `()` so the fn tail stays i64.
     assert_eq!(run("fn main() -> i64 { println(\"interp\")\n 9 }"), 9);
 }
+
+#[test]
+fn str_add_concat() {
+    let src = "fn main() -> i64 { let s = \"foo\" + \"bar\" + \"\"\n if s == \"foobar\" && s.len == 6 { 3 } else { 0 } }";
+    assert_eq!(run(src), 3);
+}

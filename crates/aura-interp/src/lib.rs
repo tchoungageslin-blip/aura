@@ -651,6 +651,9 @@ impl<'a> Interp<'a> {
             (BinOp::Div | BinOp::Rem, Value::Int(_), Value::Int(0)) => Err(InterpError::DivByZero),
             (BinOp::Div, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_div(*b))),
             (BinOp::Rem, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_rem(*b))),
+            (BinOp::Add, Value::Str(a), Value::Str(b)) => {
+                Ok(Value::Str(Rc::from(format!("{a}{b}"))))
+            }
             (BinOp::Add, Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
             (BinOp::Sub, Value::Float(a), Value::Float(b)) => Ok(Value::Float(a - b)),
             (BinOp::Mul, Value::Float(a), Value::Float(b)) => Ok(Value::Float(a * b)),
