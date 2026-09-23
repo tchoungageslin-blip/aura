@@ -73,6 +73,17 @@ fn bad_main_sig_is_e3005() {
 }
 
 #[test]
+fn enum_match_emits_object() {
+    let out = compile(
+        "enum S { A(i64), B }\n\
+         fn f(s: S) -> i64 { match s { A(x) => x, B => 0 } }\n\
+         fn main() -> i64 { f(A(5)) }",
+    );
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    assert!(out.object.is_some());
+}
+
+#[test]
 fn str_literal_blocks_codegen() {
     let db = AuraDatabase::with_event_log(false);
     let file = SourceFile::new(

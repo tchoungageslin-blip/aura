@@ -116,6 +116,22 @@ fn run_hello_returns_1() {
 }
 
 #[test]
+fn run_enum_fixture_returns_12() {
+    if runtime_lib().is_none() {
+        return;
+    }
+    let out = aura(&["run", fixture("enum.aura").to_str().unwrap()]);
+    // tag(Circle)*10 + tag(Rect) = 1*10 + 2 = 12.
+    assert_eq!(
+        out.status.code(),
+        Some(12),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
 fn run_propagates_exit_code() {
     if runtime_lib().is_none() {
         return;

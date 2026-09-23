@@ -292,8 +292,19 @@ impl Checker<'_> {
         match self.res.lookup(self.name(name)) {
             Some(Def::Fn(idx)) => fn_type(self.items, idx),
             Some(Def::ExternFn(block, f)) => extern_fn_type(self.items, block, f),
-            // Unit-like variant used bare: `Empty`.
-            Some(Def::Variant(e, _)) => Type::Enum(e),
+            Some(Def::Variant(e, v)) => {
+                let payload = enum_variant_payload(self.items, e, v);
+                if payload.is_empty() {
+                    // Unit-like variant used bare: `Empty`.
+                    Type::Enum(e)
+                } else {
+                    // `Circle(f64)` — a constructor `fn(payload..) -> Enum`.
+                    Type::Fn {
+                        params: payload,
+                        ret: Box::new(Type::Enum(e)),
+                    }
+                }
+            }
             Some(Def::Struct(_) | Def::Enum(_)) => {
                 self.err(
                     codes::SEM_UNDECLARED_VAR,
@@ -947,7 +958,8 @@ fn extern_fn_type(items: &FileItems, block: u32, f: u32) -> Type {
 }
 
 /// Positional payload types of `variants[v]` in enum item `e`.
-fn enum_variant_payload(items: &FileItems, e: u32, v: u32) -> Vec<Type> {
+#[must_use]
+pub fn enum_variant_payload(items: &FileItems, e: u32, v: u32) -> Vec<Type> {
     match items.items.get(e as usize) {
         Some(ItemSig::Enum { variants, .. }) => variants
             .get(v as usize)

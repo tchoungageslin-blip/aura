@@ -85,6 +85,9 @@ fn place(p: &Place) -> String {
             crate::Proj::Field(i) => {
                 let _ = write!(s, ".{i}");
             }
+            crate::Proj::VariantField { variant, field } => {
+                let _ = write!(s, ".<v{variant}>.{field}");
+            }
         }
     }
     s
@@ -149,5 +152,17 @@ fn rvalue(r: &Rvalue) -> String {
                 .collect();
             format!("struct#{item} {{ {} }}", f.join(", "))
         }
+        Rvalue::EnumLit {
+            item,
+            variant,
+            fields,
+        } => {
+            let f: Vec<String> = fields
+                .iter()
+                .map(|(i, o)| format!("{i}: {}", operand(o)))
+                .collect();
+            format!("enum#{item}::v{variant} {{ {} }}", f.join(", "))
+        }
+        Rvalue::Discriminant(p) => format!("disc({})", place(p)),
     }
 }

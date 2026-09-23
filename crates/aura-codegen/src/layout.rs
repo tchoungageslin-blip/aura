@@ -8,7 +8,12 @@
 use aura_salsa_db::{FileItems, ItemSig, TypeName};
 use aura_semantic::{Type, lower_typename};
 
-/// Byte layout of one struct type.
+/// Byte layout of one aggregate type (struct or enum).
+///
+/// Structs use `offsets`/`field_tys` directly. Enums are
+/// `{ tag: i32 @0, payload: union @payload_off }` — `variants[v]` holds
+/// the payload struct layout of variant `v` (`size == 0` payload for
+/// unit variants).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layout {
     /// Padded total size in bytes.
@@ -19,6 +24,10 @@ pub struct Layout {
     pub offsets: Vec<u32>,
     /// Lowered field types, in declaration order.
     pub field_tys: Vec<Type>,
+    /// Enum payload region offset (tag is `i32` at 0). 0 for structs.
+    pub payload_off: u32,
+    /// Per-variant payload layouts (empty for structs).
+    pub variants: Vec<Layout>,
 }
 
 /// Size/alignment of a scalar type in bytes. Aggregates are represented
@@ -45,38 +54,95 @@ pub fn scalar_size_align(ty: &Type, ptr_size: u32) -> Option<(u32, u32)> {
     })
 }
 
+/// Compute the [`Layout`] of `FileItems.items[idx]` — struct or enum.
+/// `None` for other items or unrepresentable fields.
+pub fn layout_of(items: &FileItems, idx: u32, ptr_size: u32) -> Option<Layout> {
+    match items.items.get(idx as usize)? {
+        ItemSig::Struct { .. } => struct_layout(items, idx, ptr_size),
+        ItemSig::Enum { .. } => enum_layout(items, idx, ptr_size),
+        _ => None,
+    }
+}
+
 /// Compute the [`Layout`] of `FileItems.items[idx]` (must be a struct).
 /// `None` for non-struct items or fields without a representation.
 pub fn struct_layout(items: &FileItems, idx: u32, ptr_size: u32) -> Option<Layout> {
     let ItemSig::Struct { fields, .. } = items.items.get(idx as usize)? else {
         return None;
     };
-    let mut offsets = Vec::with_capacity(fields.len());
-    let mut field_tys = Vec::with_capacity(fields.len());
+    let field_tys: Vec<Type> = fields.iter().map(|f| field_ty(items, &f.ty)).collect();
+    let (offsets, size, align) = layout_fields(items, &field_tys, ptr_size)?;
+    Some(Layout {
+        size,
+        align,
+        offsets,
+        field_tys,
+        payload_off: 0,
+        variants: Vec::new(),
+    })
+}
+
+/// Enum layout: `i32` tag at offset 0, then a union of the per-variant
+/// payload structs at `payload_off` (aligned to the payload's alignment).
+/// `None` for non-enum items or unrepresentable payloads.
+pub fn enum_layout(items: &FileItems, idx: u32, ptr_size: u32) -> Option<Layout> {
+    const TAG: u32 = 4; // i32 tag
+    let ItemSig::Enum { variants, .. } = items.items.get(idx as usize)? else {
+        return None;
+    };
+    let mut layouts = Vec::with_capacity(variants.len());
+    let mut max_size = 0u32;
+    let mut max_align = 1u32;
+    for (_, payload) in variants {
+        let tys: Vec<Type> = payload.iter().map(|t| field_ty(items, t)).collect();
+        let (offsets, size, align) = layout_fields(items, &tys, ptr_size)?;
+        max_size = max_size.max(size);
+        max_align = max_align.max(align);
+        layouts.push(Layout {
+            size,
+            align,
+            offsets,
+            field_tys: tys,
+            payload_off: 0,
+            variants: Vec::new(),
+        });
+    }
+    let payload_off = align_to(TAG, max_align);
+    Some(Layout {
+        size: align_to(payload_off + max_size, max_align.max(TAG)),
+        align: max_align.max(TAG),
+        offsets: Vec::new(),
+        field_tys: Vec::new(),
+        payload_off,
+        variants: layouts,
+    })
+}
+
+/// Shared C-layout math: field offsets at natural alignment, total size
+/// padded to `align`. `None` if any field type is unrepresentable.
+fn layout_fields(
+    items: &FileItems,
+    field_tys: &[Type],
+    ptr_size: u32,
+) -> Option<(Vec<u32>, u32, u32)> {
+    let mut offsets = Vec::with_capacity(field_tys.len());
     let mut size: u32 = 0;
     let mut align: u32 = 1;
-    for f in fields {
-        let ty = field_ty(items, &f.ty);
+    for ty in field_tys {
         // Aggregate fields are stored inline — recurse for their size.
-        let (fs, fa) = match &ty {
-            Type::Struct(inner) => {
-                let l = struct_layout(items, *inner, ptr_size)?;
+        let (fs, fa) = match ty {
+            Type::Struct(inner) | Type::Enum(inner) => {
+                let l = layout_of(items, *inner, ptr_size)?;
                 (l.size, l.align)
             }
             t => scalar_size_align(t, ptr_size)?,
         };
         size = align_to(size, fa);
         offsets.push(size);
-        field_tys.push(ty);
         size += fs;
         align = align.max(fa);
     }
-    Some(Layout {
-        size: align_to(size, align),
-        align,
-        offsets,
-        field_tys,
-    })
+    Some((offsets, align_to(size, align), align))
 }
 
 fn field_ty(items: &FileItems, tn: &TypeName) -> Type {

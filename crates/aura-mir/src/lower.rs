@@ -11,11 +11,13 @@
 //! short-circuit through a branch + join so operand side effects are
 //! preserved.
 
-use aura_ast::{BinOp, BlockId, Expr, ExprId, Literal, Stmt, StmtId};
+use aura_ast::{BinOp, BlockId, Expr, ExprId, Literal, MatchArm, Pattern, Stmt, StmtId};
 use aura_common::{Diagnostic, Span, codes};
 use aura_hir::hir_fn;
 use aura_salsa_db::{Body, Db, FileItems, ItemSig, SourceFile, file_items};
-use aura_semantic::{Def, FnTypes, Resolution, Type, lower_typename, resolved_file};
+use aura_semantic::{
+    Def, FnTypes, IntTy, Resolution, Type, enum_variant_payload, lower_typename, resolved_file,
+};
 use indexmap::IndexMap;
 use lasso::Spur;
 
@@ -385,11 +387,7 @@ impl Lowerer<'_> {
                     None => Operand::Const(Const::Unit),
                 }
             }
-            Expr::Match { scrutinee, .. } => {
-                let _ = self.expr(*scrutinee);
-                self.unsupported("match expressions", self.span(id));
-                Operand::Const(Const::Unit)
-            }
+            Expr::Match { scrutinee, arms } => self.match_expr(*scrutinee, arms, id),
             Expr::StructLit { name, fields } => self.struct_lit(*name, fields, id),
             Expr::Try { expr } => {
                 let _ = self.expr(*expr);
@@ -413,8 +411,15 @@ impl Lowerer<'_> {
             return Operand::Place(Place::local(l));
         }
         match self.res.lookup(self.name(name)) {
-            // Bare fn/variant used as a value — needs function pointers /
-            // enum repr, both deferred.
+            // Bare unit variant (`Color::Red` written as `Red`) constructs
+            // a tag-only enum value.
+            Some(Def::Variant(e, vi))
+                if aura_semantic::enum_variant_payload(self.items, e, vi).is_empty() =>
+            {
+                self.enum_lit(e, vi, Vec::new(), id)
+            }
+            // Bare fn/payload-variant used as a value — needs function
+            // pointers, deferred.
             Some(Def::Fn(_) | Def::ExternFn(..) | Def::Variant(..)) => {
                 self.unsupported("function/variant values", self.span(id));
                 Operand::Const(Const::Unit)
@@ -504,12 +509,9 @@ impl Lowerer<'_> {
                 match self.res.lookup(self.name(*name)) {
                     Some(Def::Fn(i)) => Callee::Fn(i),
                     Some(Def::ExternFn(b, f)) => Callee::Extern(b, f),
-                    Some(Def::Variant(..)) => {
-                        self.unsupported("enum variant constructors", self.span(callee));
-                        for &a in args {
-                            self.expr(a);
-                        }
-                        return Operand::Const(Const::Unit);
+                    Some(Def::Variant(e, vi)) => {
+                        let ops: Vec<Operand> = args.iter().map(|&a| self.expr(a)).collect();
+                        return self.enum_lit(e, vi, ops, id);
                     }
                     _ => {
                         for &a in args {
@@ -569,6 +571,216 @@ impl Lowerer<'_> {
             },
         );
         Operand::Place(Place::local(t))
+    }
+
+    /// `Enum::Variant(args..)` construction — a temp holding
+    /// `{ tag: i32 = variant, payload }`.
+    fn enum_lit(&mut self, item: u32, variant: u32, args: Vec<Operand>, id: ExprId) -> Operand {
+        let ty = self.expr_ty(id).clone();
+        let t = self.temp(ty);
+        let fields: Vec<(u32, Operand)> = (0..).take(args.len()).zip(args).collect();
+        self.assign(
+            Place::local(t),
+            Rvalue::EnumLit {
+                item,
+                variant,
+                fields,
+            },
+        );
+        Operand::Place(Place::local(t))
+    }
+
+    // ----- match ------------------------------------------------------------------
+
+    /// `match scr { arms }` — a linear test chain: each arm gets a test
+    /// block (discriminant compare / literal compare / unconditional) and
+    /// a body block; all bodies join at `join`. Exhaustiveness is already
+    /// enforced by typeck, so the fall-through block is `Unreachable`.
+    fn match_expr(&mut self, scrutinee: ExprId, arms: &[MatchArm], id: ExprId) -> Operand {
+        let scr = self.expr(scrutinee);
+        let scr_ty = self.expr_ty(scrutinee).clone();
+        // Materialize the scrutinee into a place we can project/test.
+        let scr_place = if let Operand::Place(p) = scr {
+            p
+        } else {
+            let t = self.temp(scr_ty.clone());
+            self.assign(Place::local(t), Rvalue::Use(scr));
+            Place::local(t)
+        };
+        let ty = self.expr_ty(id).clone();
+        let res = (!matches!(ty, Type::Unit | Type::Never | Type::Error)).then(|| self.temp(ty));
+        let join = self.new_block();
+
+        for arm in arms {
+            let arm_bb = self.new_block();
+            let next = self.new_block();
+            match self.match_test(&arm.pattern, &scr_place, &scr_ty) {
+                Some(cond) => self.terminate(MirTerm::Branch {
+                    cond,
+                    then: arm_bb,
+                    else_: next,
+                }),
+                None => self.terminate(MirTerm::Goto(arm_bb)),
+            }
+            self.switch_to(arm_bb);
+            self.scopes.push(IndexMap::new());
+            self.bind_pattern(&arm.pattern, &scr_place);
+            let op = self.expr(arm.body);
+            if let Some(r) = res {
+                self.assign(Place::local(r), Rvalue::Use(op));
+            }
+            self.scopes.pop();
+            self.goto(join);
+            self.switch_to(next);
+        }
+        // Non-exhaustive residue: unreachable by typeck's exhaustiveness
+        // proof; the terminator keeps the CFG well-formed if that was
+        // suppressed by earlier errors.
+        self.terminate(MirTerm::Unreachable);
+        self.switch_to(join);
+        res.map_or(Operand::Const(Const::Unit), |r| {
+            Operand::Place(Place::local(r))
+        })
+    }
+
+    /// Emit the test for `pat` into the current block. Returns the bool
+    /// operand guarding the arm, or `None` for an unconditional arm
+    /// (wildcard / binding ident).
+    fn match_test(&mut self, pat: &Pattern, scr: &Place, scr_ty: &Type) -> Option<Operand> {
+        match pat {
+            Pattern::Wildcard => None,
+            // An ident that names a variant is a discriminant test; any
+            // other ident binds unconditionally.
+            Pattern::Ident(n) => {
+                let text = self.name(*n).to_owned();
+                match self.res.lookup(&text) {
+                    Some(Def::Variant(e, vi)) => Some(self.variant_test(scr, e, vi)),
+                    _ => None,
+                }
+            }
+            Pattern::Literal(l) => {
+                let c = Self::lit_const(l, scr_ty);
+                let eq = self.temp(Type::Bool);
+                self.assign(
+                    Place::local(eq),
+                    Rvalue::Binary(BinOp::Eq, Operand::Place(scr.clone()), Operand::Const(c)),
+                );
+                Some(Operand::Place(Place::local(eq)))
+            }
+            Pattern::Variant { name, args } => {
+                let text = self.name(*name).to_owned();
+                let Some(Def::Variant(e, vi)) = self.res.lookup(&text) else {
+                    return None; // unresolved — typeck already diagnosed
+                };
+                let mut cond = self.variant_test(scr, e, vi);
+                // Nested patterns in the payload refine the test.
+                for (i, sub) in args.iter().enumerate() {
+                    let mut proj = scr.proj.clone();
+                    proj.push(Proj::VariantField {
+                        variant: vi,
+                        field: u32::try_from(i).unwrap_or(u32::MAX),
+                    });
+                    let sub_place = Place {
+                        local: scr.local,
+                        proj,
+                    };
+                    let fty = enum_variant_payload(self.items, e, vi)
+                        .get(i)
+                        .cloned()
+                        .unwrap_or(Type::Error);
+                    if let Some(sub) = self.match_test(sub, &sub_place, &fty) {
+                        let both = self.temp(Type::Bool);
+                        self.assign(Place::local(both), Rvalue::Binary(BinOp::And, cond, sub));
+                        cond = Operand::Place(Place::local(both));
+                    }
+                }
+                Some(cond)
+            }
+        }
+    }
+
+    /// `disc(scr) == variant` → a fresh bool local holding the result.
+    fn variant_test(&mut self, scr: &Place, _e: u32, vi: u32) -> Operand {
+        let d = self.temp(Type::Int(IntTy::I32));
+        self.assign(Place::local(d), Rvalue::Discriminant(scr.clone()));
+        let eq = self.temp(Type::Bool);
+        self.assign(
+            Place::local(eq),
+            Rvalue::Binary(
+                BinOp::Eq,
+                Operand::Place(Place::local(d)),
+                Operand::Const(Const::Int(u64::from(vi), IntTy::I32)),
+            ),
+        );
+        Operand::Place(Place::local(eq))
+    }
+
+    /// Install `pat`'s bindings in the current scope — runs inside the
+    /// arm block, after the discriminant test proved the pattern.
+    fn bind_pattern(&mut self, pat: &Pattern, scr: &Place) {
+        match pat {
+            Pattern::Ident(n) => {
+                // Variant names don't bind — they're tested, not bound.
+                let text = self.name(*n).to_owned();
+                if matches!(self.res.lookup(&text), Some(Def::Variant(..))) {
+                    return;
+                }
+                if let Some(s) = self.scopes.last_mut() {
+                    s.insert(*n, scr.local);
+                }
+            }
+            Pattern::Variant { name, args } => {
+                let text = self.name(*name).to_owned();
+                let Some(Def::Variant(e, vi)) = self.res.lookup(&text) else {
+                    return;
+                };
+                let payload = enum_variant_payload(self.items, e, vi);
+                for (i, sub) in args.iter().enumerate() {
+                    let mut proj = scr.proj.clone();
+                    proj.push(Proj::VariantField {
+                        variant: vi,
+                        field: u32::try_from(i).unwrap_or(u32::MAX),
+                    });
+                    let sub_place = Place {
+                        local: scr.local,
+                        proj,
+                    };
+                    if let Pattern::Ident(n) = sub {
+                        let ty = payload.get(i).cloned().unwrap_or(Type::Error);
+                        let l = self.new_local(ty, Some(self.name(*n).to_owned()), false);
+                        self.assign(Place::local(l), Rvalue::Use(Operand::Place(sub_place)));
+                        if let Some(s) = self.scopes.last_mut() {
+                            s.insert(*n, l);
+                        }
+                    } else {
+                        self.bind_pattern(sub, &sub_place);
+                    }
+                }
+            }
+            Pattern::Wildcard | Pattern::Literal(_) => {}
+        }
+    }
+
+    /// `Literal` → [`Const`], typing ints/floats by the scrutinee type.
+    fn lit_const(l: &Literal, scr_ty: &Type) -> Const {
+        match l {
+            Literal::Int(v) => {
+                let ity = match scr_ty {
+                    Type::Int(i) => *i,
+                    _ => IntTy::I64,
+                };
+                Const::Int(*v, ity)
+            }
+            Literal::Float(v) => {
+                let fty = match scr_ty {
+                    Type::Float(f) => *f,
+                    _ => aura_semantic::FloatTy::F64,
+                };
+                Const::Float(*v, fty)
+            }
+            Literal::Bool(b) => Const::Bool(*b),
+            Literal::Unit | Literal::Str(_) => Const::Unit,
+        }
     }
 
     /// Resolve `id` to a [`Place`] (lvalue) — `Ident` or a chain of

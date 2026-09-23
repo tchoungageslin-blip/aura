@@ -28,7 +28,7 @@ use cranelift_module::{FuncId, Linkage, Module, default_libcall_names};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 use rustc_hash::FxHashMap;
 
-use crate::layout::{Layout, struct_layout};
+use crate::layout::{Layout, layout_of};
 
 /// Everything codegen learned about the file, kept for diagnostics.
 pub struct Emitted {
@@ -110,7 +110,7 @@ pub fn emit_object(items: &FileItems, mirs: &[(u32, MirBody)]) -> Result<Emitted
         .items
         .iter()
         .enumerate()
-        .map(|(i, _)| struct_layout(items, u32::try_from(i).unwrap_or(u32::MAX), ptr.bytes()))
+        .map(|(i, _)| layout_of(items, u32::try_from(i).unwrap_or(u32::MAX), ptr.bytes()))
         .collect();
 
     // Pass 2 — emit each fn body.
@@ -364,7 +364,9 @@ impl FnGen<'_, '_> {
 
     /// `(size, align)` of an aggregate type's storage.
     fn agg_layout(&self, ty: &Type) -> Option<(u32, u32)> {
-        let Type::Struct(idx) = ty else { return None };
+        let (Type::Struct(idx) | Type::Enum(idx)) = ty else {
+            return None;
+        };
         self.layouts
             .get(*idx as usize)
             .and_then(|l| l.as_ref())
@@ -431,6 +433,36 @@ impl FnGen<'_, '_> {
                         self.store(&p, v);
                     }
                 }
+            }
+            Rvalue::EnumLit {
+                variant, fields, ..
+            } => {
+                // Tag at offset 0, payload fields at `payload_off + inner`.
+                let addr = self.place_addr(place);
+                let tag = self.b.ins().iconst(types::I32, i64::from(*variant));
+                self.b.ins().store(MemFlagsData::trusted(), tag, addr, 0);
+                for (fidx, op) in fields {
+                    let mut p = place.clone();
+                    p.proj.push(aura_mir::Proj::VariantField {
+                        variant: *variant,
+                        field: *fidx,
+                    });
+                    let fty = self.place_ty(&p);
+                    if is_aggregate(&fty) {
+                        self.copy_aggregate(&p, op);
+                    } else {
+                        let v = self.operand_val(op);
+                        self.store(&p, v);
+                    }
+                }
+            }
+            Rvalue::Discriminant(p) => {
+                let addr = self.place_addr(p);
+                let v = self
+                    .b
+                    .ins()
+                    .load(types::I32, MemFlagsData::trusted(), addr, 0);
+                self.store(place, v);
             }
         }
     }
@@ -565,16 +597,32 @@ impl FnGen<'_, '_> {
             .get(p.local as usize)
             .map_or(Type::Error, |l| l.ty.clone());
         for proj in &p.proj {
-            let aura_mir::Proj::Field(i) = proj;
-            if let Type::Struct(idx) = ty {
-                ty = self
-                    .layouts
-                    .get(idx as usize)
-                    .and_then(|l| l.as_ref())
-                    .and_then(|l| l.field_tys.get(*i as usize).cloned())
-                    .unwrap_or(Type::Error);
-            } else {
-                return Type::Error;
+            match proj {
+                aura_mir::Proj::Field(i) => {
+                    if let Type::Struct(idx) = ty {
+                        ty = self
+                            .layouts
+                            .get(idx as usize)
+                            .and_then(|l| l.as_ref())
+                            .and_then(|l| l.field_tys.get(*i as usize).cloned())
+                            .unwrap_or(Type::Error);
+                    } else {
+                        return Type::Error;
+                    }
+                }
+                aura_mir::Proj::VariantField { variant, field } => {
+                    if let Type::Enum(idx) = ty {
+                        ty = self
+                            .layouts
+                            .get(idx as usize)
+                            .and_then(|l| l.as_ref())
+                            .and_then(|l| l.variants.get(*variant as usize))
+                            .and_then(|v| v.field_tys.get(*field as usize).cloned())
+                            .unwrap_or(Type::Error);
+                    } else {
+                        return Type::Error;
+                    }
+                }
             }
         }
         ty
@@ -602,16 +650,37 @@ impl FnGen<'_, '_> {
             .get(p.local as usize)
             .map_or(Type::Error, |l| l.ty.clone());
         for proj in &p.proj {
-            let aura_mir::Proj::Field(i) = proj;
-            if let Type::Struct(idx) = ty
-                && let Some(l) = self.layouts.get(idx as usize).and_then(|l| l.as_ref())
-            {
-                let off = *l.offsets.get(*i as usize).unwrap_or(&0);
-                if off != 0 {
-                    addr = self.b.ins().iadd_imm_s(addr, i64::from(off));
+            match proj {
+                aura_mir::Proj::Field(i) => {
+                    if let Type::Struct(idx) = ty
+                        && let Some(l) = self.layouts.get(idx as usize).and_then(|l| l.as_ref())
+                    {
+                        let off = *l.offsets.get(*i as usize).unwrap_or(&0);
+                        if off != 0 {
+                            addr = self.b.ins().iadd_imm_s(addr, i64::from(off));
+                        }
+                        ty = l.field_tys.get(*i as usize).cloned().unwrap_or(Type::Error);
+                        continue;
+                    }
                 }
-                ty = l.field_tys.get(*i as usize).cloned().unwrap_or(Type::Error);
-                continue;
+                aura_mir::Proj::VariantField { variant, field } => {
+                    if let Type::Enum(idx) = ty
+                        && let Some(l) = self.layouts.get(idx as usize).and_then(|l| l.as_ref())
+                        && let Some(vl) = l.variants.get(*variant as usize)
+                    {
+                        let off =
+                            l.payload_off + vl.offsets.get(*field as usize).copied().unwrap_or(0);
+                        if off != 0 {
+                            addr = self.b.ins().iadd_imm_s(addr, i64::from(off));
+                        }
+                        ty = vl
+                            .field_tys
+                            .get(*field as usize)
+                            .cloned()
+                            .unwrap_or(Type::Error);
+                        continue;
+                    }
+                }
             }
             ty = Type::Error;
         }
@@ -737,7 +806,7 @@ impl FnGen<'_, '_> {
                 }
             }
             MirTerm::Unreachable => {
-                self.b.ins().trap(TrapCode::unwrap_user(0));
+                self.b.ins().trap(TrapCode::unwrap_user(1));
             }
         }
     }

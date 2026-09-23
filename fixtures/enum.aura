@@ -1,0 +1,19 @@
+enum Shape {
+    Circle(f64),
+    Rect(f64, f64),
+    Empty,
+}
+
+fn tag(s: Shape) -> i64 {
+    match s {
+        Circle(r) => 1,
+        Rect(w, h) => 2,
+        Empty => 0,
+    }
+}
+
+fn main() -> i64 {
+    let a = Circle(2.0)
+    let b = Rect(3.0, 4.0)
+    tag(a) * 10 + tag(b)
+}

@@ -18,4 +18,4 @@ mod typeck;
 pub use infer::{InferCtx, UnifyError, VarKind};
 pub use resolve::{Def, Duplicate, Resolution, resolved_file};
 pub use ty::{FloatTy, IntTy, Type, primitive};
-pub use typeck::{FnTypes, check_file, lower_typename, typeck_fn};
+pub use typeck::{FnTypes, check_file, enum_variant_payload, lower_typename, typeck_fn};

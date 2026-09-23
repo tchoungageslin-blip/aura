@@ -105,11 +105,20 @@ impl Place {
     }
 }
 
-/// Place projection — struct field access by field index.
+/// Place projection — struct field access by field index, enum payload
+/// field access by `(variant, field)`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Proj {
     /// `.0`, `.x` — index into the struct's declared field list.
     Field(u32),
+    /// Enum payload field — only meaningful in a `match` arm where the
+    /// discriminant test proved `variant`.
+    VariantField {
+        /// Variant index in the enum's declared order.
+        variant: u32,
+        /// Field index inside that variant's positional payload.
+        field: u32,
+    },
 }
 
 /// A value producer: read a place or a constant.
@@ -145,6 +154,18 @@ pub enum Rvalue {
         item: u32,
         fields: Vec<(u32, Operand)>,
     },
+    /// `Enum::Variant(a, b)` — writes the tag (`variant`) at offset 0 and
+    /// each payload field into the destination's storage.
+    EnumLit {
+        /// `FileItems` index of the enum definition.
+        item: u32,
+        /// Variant index in declaration order (the discriminant value).
+        variant: u32,
+        /// `(payload field index, operand)` pairs.
+        fields: Vec<(u32, Operand)>,
+    },
+    /// Read the `i32` discriminant at offset 0 of an enum place.
+    Discriminant(Place),
 }
 
 /// What a call target resolves to.

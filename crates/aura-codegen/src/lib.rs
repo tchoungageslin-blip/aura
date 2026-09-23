@@ -12,7 +12,7 @@ mod emit;
 mod layout;
 
 pub use emit::Emitted;
-pub use layout::{Layout, scalar_size_align, struct_layout};
+pub use layout::{Layout, enum_layout, layout_of, scalar_size_align, struct_layout};
 
 use aura_common::{Diagnostic, Span, codes};
 use aura_mir::mir_fn;
@@ -111,15 +111,11 @@ pub fn compile_file(db: &dyn Db, file: SourceFile) -> CompileOutput {
 
 fn unsupported_ty(t: &Type, items: &FileItems) -> bool {
     match t {
-        Type::Int(IntTy::I128 | IntTy::U128)
-        | Type::Str
-        | Type::Enum(_)
-        | Type::Tuple(_)
-        | Type::Fn { .. } => true,
+        Type::Int(IntTy::I128 | IntTy::U128) | Type::Str | Type::Tuple(_) | Type::Fn { .. } => true,
         Type::Pointer { pointee, .. } => unsupported_ty(pointee, items),
-        // A struct is supported iff a C-compatible layout exists for it
-        // (all fields representable).
-        Type::Struct(i) => struct_layout(items, *i, 8).is_none(),
+        // An aggregate is supported iff a C-compatible layout exists for
+        // it (all fields representable; enums additionally need a tag).
+        Type::Struct(i) | Type::Enum(i) => layout_of(items, *i, 8).is_none(),
         Type::Int(_)
         | Type::Float(_)
         | Type::Bool

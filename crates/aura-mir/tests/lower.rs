@@ -170,3 +170,104 @@ fn dump_is_stable() {
     assert!(text.contains("bb0:"));
     assert!(text.contains("return"));
 }
+
+#[test]
+fn enum_constructs_and_match_lowers() {
+    let m = mir_of(
+        "enum S { A(i64), B, C(i64, i64) }\n\
+         fn f(s: S) -> i64 {\n  match s {\n    A(x) => x,\n    B => 0,\n    C(a, b) => a + b,\n  }\n}",
+        "f",
+    );
+    assert!(m.diagnostics.is_empty(), "{:?}", m.diagnostics);
+    // Discriminant reads drive the arm tests.
+    let disc_reads = m
+        .blocks
+        .iter()
+        .flat_map(|b| &b.stmts)
+        .filter(|s| {
+            matches!(
+                s,
+                aura_mir::MirStmt::Assign(_, aura_mir::Rvalue::Discriminant(_))
+            )
+        })
+        .count();
+    assert_eq!(
+        disc_reads,
+        3,
+        "expected one disc test per arm: {:?}",
+        dump(&m)
+    );
+    // Payload bindings read through VariantField projections.
+    let vf = m
+        .blocks
+        .iter()
+        .flat_map(|b| &b.stmts)
+        .filter(|s| {
+            matches!(
+                s,
+                aura_mir::MirStmt::Assign(_, aura_mir::Rvalue::Use(Operand::Place(p)))
+                    if p.proj.iter().any(|pr| matches!(pr, aura_mir::Proj::VariantField { .. }))
+            )
+        })
+        .count();
+    assert_eq!(vf, 3, "expected payload bindings: {:?}", dump(&m));
+    // The residue after the last arm is unreachable (exhaustive match).
+    let last = m.blocks.last().unwrap();
+    assert!(matches!(last.term, MirTerm::Unreachable));
+}
+
+#[test]
+fn enum_lit_constructs_tagged_value() {
+    let m = mir_of(
+        "enum E { X, Y(i64) }\nfn f() -> E { Y(7) }\nfn g() -> E { X }",
+        "f",
+    );
+    assert!(m.diagnostics.is_empty());
+    let has_enum_lit = m.blocks.iter().any(|b| {
+        b.stmts.iter().any(|s| {
+            matches!(
+                s,
+                aura_mir::MirStmt::Assign(_, aura_mir::Rvalue::EnumLit { variant: 1, .. })
+            )
+        })
+    });
+    assert!(has_enum_lit, "expected EnumLit: {:?}", dump(&m));
+    let g = mir_of(
+        "enum E { X, Y(i64) }\nfn f() -> E { Y(7) }\nfn g() -> E { X }",
+        "g",
+    );
+    let unit_lit = g.blocks.iter().any(|b| {
+        b.stmts.iter().any(|s| {
+            matches!(
+                s,
+                aura_mir::MirStmt::Assign(
+                    _,
+                    aura_mir::Rvalue::EnumLit {
+                        variant: 0,
+                        fields,
+                        ..
+                    }
+                ) if fields.is_empty()
+            )
+        })
+    });
+    assert!(unit_lit, "expected unit EnumLit: {:?}", dump(&g));
+}
+
+#[test]
+fn match_on_literal_uses_eq_tests() {
+    let m = mir_of("fn f(n: i64) -> i64 { match n { 0 => 1, _ => 2 } }", "f");
+    assert!(m.diagnostics.is_empty());
+    let eq_tests = m
+        .blocks
+        .iter()
+        .flat_map(|b| &b.stmts)
+        .filter(|s| {
+            matches!(
+                s,
+                aura_mir::MirStmt::Assign(_, aura_mir::Rvalue::Binary(aura_ast::BinOp::Eq, _, _))
+            )
+        })
+        .count();
+    assert_eq!(eq_tests, 1, "expected one literal test: {:?}", dump(&m));
+}
