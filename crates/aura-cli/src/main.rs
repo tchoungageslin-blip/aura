@@ -216,8 +216,9 @@ fn compile(path: &Path) -> Option<(Vec<u8>, SourceCache)> {
 }
 
 /// Locate the prebuilt `aura_runtime.lib`. Search order:
-/// `AURA_RUNTIME_LIB` env → `runtime/target/{debug,release}` next to the
-/// executable's `target` dir → same relative to the CWD.
+/// `AURA_RUNTIME_LIB` env → next to the executable (release packages) →
+/// `runtime/target/{debug,release}` next to the executable's `target`
+/// dir → same relative to the CWD.
 fn runtime_lib() -> Result<PathBuf, String> {
     if let Ok(p) = std::env::var("AURA_RUNTIME_LIB") {
         let p = PathBuf::from(p);
@@ -226,11 +227,17 @@ fn runtime_lib() -> Result<PathBuf, String> {
         }
         return Err(format!("AURA_RUNTIME_LIB={} is not a file", p.display()));
     }
+    let exe = std::env::current_exe().unwrap_or_default();
+    if let Some(dir) = exe.parent() {
+        let beside = dir.join("aura_runtime.lib");
+        if beside.is_file() {
+            return Ok(beside);
+        }
+    }
     let rel = [
         PathBuf::from("runtime/target/debug/aura_runtime.lib"),
         PathBuf::from("runtime/target/release/aura_runtime.lib"),
     ];
-    let exe = std::env::current_exe().unwrap_or_default();
     // exe is <repo>/target/{debug,release}/aura.exe → repo root is ../..
     for anchor in [
         exe.parent()
