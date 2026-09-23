@@ -12,6 +12,7 @@ aura-common.workspace = true
 aura-salsa-db.workspace = true
 aura-semantic.workspace = true
 aura-ast.workspace = true
+aura-lexer.workspace = true
 aura-fmt.workspace = true
 async-lsp.workspace = true
 lasso.workspace = true

@@ -219,6 +219,7 @@ dependencies = [
  "aura-ast",
  "aura-common",
  "aura-fmt",
+ "aura-lexer",
  "aura-salsa-db",
  "aura-semantic",
  "futures",
