@@ -183,6 +183,115 @@ fn f(s: Shape) -> i64 {
     assert_has(src, codes::SEM_UNKNOWN_VARIANT);
 }
 
+// ----- Result / `?` ---------------------------------------------------------------
+
+#[test]
+fn result_ok_err_and_match() {
+    let src = "\
+fn f(ok: bool) -> Result<i64, i64> {
+    if ok { Ok(1) } else { Err(2) }
+}
+fn g(r: Result<i64, i64>) -> i64 {
+    match r { Ok(v) => v, Err(e) => e }
+}
+";
+    assert!(diags(src).is_empty(), "{:?}", diags(src));
+}
+
+#[test]
+fn result_try_propagates() {
+    let src = "\
+fn inner(ok: bool) -> Result<i64, i64> {
+    if ok { Ok(1) } else { Err(2) }
+}
+fn outer(ok: bool) -> Result<i64, i64> {
+    let v = inner(ok)?
+    Ok(v + 1)
+}
+";
+    assert!(diags(src).is_empty(), "{:?}", diags(src));
+}
+
+#[test]
+fn try_on_non_result() {
+    let src = "\
+fn f() -> i64 {
+    let x = 5?
+    x
+}
+";
+    assert_has(src, codes::SEM_TYPE_MISMATCH);
+}
+
+#[test]
+fn try_in_non_result_fn() {
+    let src = "\
+fn inner() -> Result<i64, i64> { Ok(1) }
+fn f() -> i64 {
+    let x = inner()?
+    x
+}
+";
+    assert_has(src, codes::SEM_TYPE_MISMATCH);
+}
+
+#[test]
+fn try_error_side_must_match_return() {
+    let src = "\
+fn inner() -> Result<i64, i64> { Err(1) }
+fn outer() -> Result<i64, bool> {
+    let x = inner()?
+    Ok(x)
+}
+";
+    assert_has(src, codes::SEM_TYPE_MISMATCH);
+}
+
+#[test]
+fn result_match_non_exhaustive() {
+    let src = "\
+fn inner() -> Result<i64, i64> { Ok(1) }
+fn f() -> i64 {
+    match inner() { Ok(v) => v }
+}
+";
+    assert_has(src, codes::SEM_NON_EXHAUSTIVE_MATCH);
+}
+
+#[test]
+fn result_ctor_arity() {
+    let src = "\
+fn f() -> Result<i64, i64> { Ok() }
+";
+    assert_has(src, codes::SEM_ARG_COUNT);
+}
+
+/// File-local `Ok`/`Err` names (e.g. an enum's variants) shadow the
+/// built-in prelude constructors.
+#[test]
+fn user_defs_shadow_result_prelude() {
+    let src = "\
+enum Verdict { Ok(i64), Err(i64) }
+fn f() -> i64 {
+    let v = Ok(5)
+    match v { Ok(x) => x, Err(e) => e }
+}
+";
+    assert!(diags(src).is_empty(), "{:?}", diags(src));
+}
+
+#[test]
+fn result_nested_and_in_struct() {
+    let src = "\
+struct Box { r: Result<i64, i64> }
+fn f() -> Result<Result<i64, i64>, i64> { Ok(Ok(7)) }
+fn g(b: Box) -> i64 {
+    match b.r { Ok(v) => v, Err(e) => e }
+}
+";
+    assert!(diags(src).is_empty(), "{:?}", diags(src));
+}
+
 // ----- extern fns -----------------------------------------------------------------
 
 #[test]

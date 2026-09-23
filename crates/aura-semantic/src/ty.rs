@@ -108,6 +108,9 @@ pub enum Type {
         mutable: bool,
         pointee: Box<Type>,
     },
+    /// Built-in `Result<T, E>` — same `{tag, payload}` repr as enums;
+    /// `Ok` is variant 0, `Err` variant 1.
+    Result(Box<Type>, Box<Type>),
     /// Inference variable — internal to `InferCtx`, never in outputs.
     Var(u32),
 }
@@ -143,6 +146,9 @@ impl Type {
                     if *mutable { "mut" } else { "const" },
                     pointee.display(items)
                 )
+            }
+            Type::Result(ok, err) => {
+                format!("Result<{}, {}>", ok.display(items), err.display(items))
             }
             Type::Var(v) => format!("?v{v}"),
         }

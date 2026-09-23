@@ -1,0 +1,15 @@
+fn inner(ok: bool) -> Result<i64, i64> {
+    if ok { Ok(10) } else { Err(3) }
+}
+
+fn outer(ok: bool) -> Result<i64, i64> {
+    let v = inner(ok)?
+    Ok(v + 1)
+}
+
+fn main() -> i64 {
+    match outer(true) {
+        Ok(v) => v,
+        Err(e) => e,
+    }
+}

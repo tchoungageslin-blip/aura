@@ -94,6 +94,9 @@ impl InferCtx {
                 mutable,
                 pointee: Box::new(self.resolve(&pointee)),
             },
+            Type::Result(ok, err) => {
+                Type::Result(Box::new(self.resolve(&ok)), Box::new(self.resolve(&err)))
+            }
             t => t,
         }
     }
@@ -140,6 +143,10 @@ impl InferCtx {
                 mutable,
                 pointee: Box::new(self.finalize(&pointee, unbound)),
             },
+            Type::Result(ok, err) => Type::Result(
+                Box::new(self.finalize(&ok, unbound)),
+                Box::new(self.finalize(&err, unbound)),
+            ),
             t => t,
         }
     }
@@ -208,6 +215,10 @@ impl InferCtx {
                     pointee: bp,
                 },
             ) if am == bm => self.unify(ap, bp),
+            (Type::Result(ao, ae), Type::Result(bo, be)) => {
+                self.unify(ao, bo)?;
+                self.unify(ae, be)
+            }
             _ => Err(UnifyError {
                 expected: a,
                 found: b,

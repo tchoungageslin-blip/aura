@@ -132,6 +132,48 @@ fn run_enum_fixture_returns_12() {
 }
 
 #[test]
+fn run_result_fixture_returns_11() {
+    if runtime_lib().is_none() {
+        return;
+    }
+    let out = aura(&["run", fixture("result.aura").to_str().unwrap()]);
+    // result.aura: outer(true) → inner(true)? = 10 → Ok(11) → match → 11.
+    assert_eq!(
+        out.status.code(),
+        Some(11),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn run_result_err_path_returns_3() {
+    if runtime_lib().is_none() {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("aura-e2e-err-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let src = dir.join("rerr.aura");
+    std::fs::write(
+        &src,
+        "fn inner(ok: bool) -> Result<i64, i64> { if ok { Ok(10) } else { Err(3) } }\n\
+         fn outer(ok: bool) -> Result<i64, i64> { let v = inner(ok)?\n Ok(v + 1) }\n\
+         fn main() -> i64 { match outer(false) { Ok(v) => v, Err(e) => e } }\n",
+    )
+    .unwrap();
+    let out = aura(&["run", src.to_str().unwrap()]);
+    let _ = std::fs::remove_dir_all(&dir);
+    // outer(false) → inner(false) = Err(3) → `?` propagates → match → 3.
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
 fn run_propagates_exit_code() {
     if runtime_lib().is_none() {
         return;

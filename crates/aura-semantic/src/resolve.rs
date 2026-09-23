@@ -26,6 +26,11 @@ pub enum Def {
     Variant(u32, u32),
     /// `fn` inside an `extern` block — `(block item idx, fn idx)`.
     ExternFn(u32, u32),
+    /// Built-in `Ok` constructor of `Result<T, E>` (prelude; a file-local
+    /// `Ok` definition shadows it).
+    ResultOk,
+    /// Built-in `Err` constructor of `Result<T, E>`.
+    ResultErr,
 }
 
 /// A redefinition: `name` defined at both `first` and `dup` item indices.
@@ -89,6 +94,9 @@ fn resolve_items(items: &FileItems) -> Resolution {
             ItemSig::Use { .. } | ItemSig::Error => {}
         }
     }
+    // Prelude: `Ok`/`Err` constructors — file-local definitions win.
+    res.defs.entry("Ok".into()).or_insert(Def::ResultOk);
+    res.defs.entry("Err".into()).or_insert(Def::ResultErr);
     res
 }
 
@@ -102,7 +110,8 @@ fn insert(res: &mut Resolution, name: &str, item: u32, def: Def) {
                 | Def::Variant(i, _)
                 | Def::ExternFn(i, _),
             ) => *i,
-            None => item,
+            // Prelude defs never reach `insert` — covered for exhaustiveness.
+            Some(Def::ResultOk | Def::ResultErr) | None => item,
         };
         res.duplicates.push(Duplicate {
             name: name.to_owned(),

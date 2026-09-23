@@ -271,3 +271,106 @@ fn match_on_literal_uses_eq_tests() {
         .count();
     assert_eq!(eq_tests, 1, "expected one literal test: {:?}", dump(&m));
 }
+
+// ----- Result / `?` ---------------------------------------------------------------
+
+#[test]
+fn result_ctors_lower_to_tagged_lits() {
+    let m = mir_of(
+        "fn f(ok: bool) -> Result<i64, i64> { if ok { Ok(1) } else { Err(2) } }",
+        "f",
+    );
+    assert!(m.diagnostics.is_empty(), "{:?}", m.diagnostics);
+    // Both ctors become EnumLit on the RESULT_ITEM sentinel (Ok=v0, Err=v1).
+    for variant in [0u32, 1] {
+        let found = m.blocks.iter().any(|b| {
+            b.stmts.iter().any(|s| {
+                matches!(
+                    s,
+                    aura_mir::MirStmt::Assign(
+                        _,
+                        aura_mir::Rvalue::EnumLit {
+                            item,
+                            variant: v,
+                            ..
+                        }
+                    ) if *item == aura_mir::RESULT_ITEM && *v == variant
+                )
+            })
+        });
+        assert!(found, "missing Result v{variant} lit: {:?}", dump(&m));
+    }
+}
+
+#[test]
+fn try_desugars_to_disc_branch_and_err_return() {
+    let m = mir_of(
+        "fn inner() -> Result<i64, i64> { Ok(1) }\n\
+         fn outer() -> Result<i64, i64> {\n  let v = inner()?\n  Ok(v)\n}",
+        "outer",
+    );
+    assert!(m.diagnostics.is_empty(), "{:?}", m.diagnostics);
+    // Entry: disc(scr) == 0 test, branch Ok/Err.
+    let MirTerm::Branch { then, else_, .. } = m.blocks[0].term else {
+        panic!("entry must branch on the discriminant: {:?}", dump(&m));
+    };
+    // Err block writes `_0 = Result::Err { .. }` and returns.
+    let err = &m.blocks[else_ as usize];
+    let writes_err = err.stmts.iter().any(|s| {
+        matches!(
+            s,
+            aura_mir::MirStmt::Assign(
+                p,
+                aura_mir::Rvalue::EnumLit {
+                    item,
+                    variant: 1,
+                    fields,
+                }
+            ) if *item == aura_mir::RESULT_ITEM
+                && p.local == 0
+                && matches!(fields.first(), Some((0, Operand::Place(src)))
+                    if src.proj.iter().any(|pr| matches!(pr,
+                        aura_mir::Proj::VariantField { variant: 1, field: 0 })))
+        )
+    });
+    assert!(
+        writes_err,
+        "Err block must write _0 = Err(scr.<v1>.0): {:?}",
+        dump(&m)
+    );
+    assert!(matches!(err.term, MirTerm::Return));
+    // Ok block binds the payload place `scr.<v0>.0`.
+    let ok = &m.blocks[then as usize];
+    let reads_ok = ok.stmts.iter().any(|s| {
+        matches!(
+            s,
+            aura_mir::MirStmt::Assign(_, aura_mir::Rvalue::Use(Operand::Place(p)))
+                if p.proj.iter().any(|pr| matches!(pr,
+                    aura_mir::Proj::VariantField { variant: 0, field: 0 }))
+        )
+    });
+    assert!(reads_ok, "Ok block must read scr.<v0>.0: {:?}", dump(&m));
+}
+
+#[test]
+fn match_on_result_binds_payloads() {
+    let m = mir_of(
+        "fn inner() -> Result<i64, i64> { Ok(1) }\n\
+         fn f() -> i64 {\n  match inner() {\n    Ok(v) => v,\n    Err(e) => e,\n  }\n}",
+        "f",
+    );
+    assert!(m.diagnostics.is_empty(), "{:?}", m.diagnostics);
+    // Two discriminant tests (v0 Ok, v1 Err), payload binds via VariantField.
+    let discs = m
+        .blocks
+        .iter()
+        .flat_map(|b| &b.stmts)
+        .filter(|s| {
+            matches!(
+                s,
+                aura_mir::MirStmt::Assign(_, aura_mir::Rvalue::Discriminant(_))
+            )
+        })
+        .count();
+    assert_eq!(discs, 2, "expected Ok+Err tests: {:?}", dump(&m));
+}

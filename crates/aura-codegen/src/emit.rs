@@ -167,7 +167,7 @@ fn internal(msg: &str) -> Vec<Diagnostic> {
 
 /// Is `ty` passed/returned by hidden pointer (internal aggregate ABI)?
 fn is_aggregate(ty: &Type) -> bool {
-    matches!(ty, Type::Struct(_) | Type::Enum(_))
+    matches!(ty, Type::Struct(_) | Type::Enum(_) | Type::Result(..))
 }
 
 /// clif representation of `ty`: scalars get their natural type,
@@ -187,6 +187,7 @@ fn clif_ty(ty: &Type, ptr: cranelift_codegen::ir::Type) -> cranelift_codegen::ir
         Type::Str
         | Type::Struct(_)
         | Type::Enum(_)
+        | Type::Result(..)
         | Type::Pointer { .. }
         | Type::Fn { .. }
         | Type::Tuple(_) => ptr,
@@ -362,15 +363,23 @@ impl FnGen<'_, '_> {
         }
     }
 
+    /// [`Layout`] of any aggregate type — declared items via the
+    /// precomputed table, built-in `Result` computed on the fly.
+    fn layout_for(&self, ty: &Type) -> Option<Layout> {
+        match ty {
+            Type::Struct(idx) | Type::Enum(idx) => {
+                self.layouts.get(*idx as usize).cloned().flatten()
+            }
+            Type::Result(ok, err) => {
+                crate::layout::result_layout(self.items, ok, err, self.ptr.bytes())
+            }
+            _ => None,
+        }
+    }
+
     /// `(size, align)` of an aggregate type's storage.
     fn agg_layout(&self, ty: &Type) -> Option<(u32, u32)> {
-        let (Type::Struct(idx) | Type::Enum(idx)) = ty else {
-            return None;
-        };
-        self.layouts
-            .get(*idx as usize)
-            .and_then(|l| l.as_ref())
-            .map(|l| (l.size, l.align))
+        self.layout_for(ty).map(|l| (l.size, l.align))
     }
 
     // ----- statements ------------------------------------------------------------
@@ -611,12 +620,10 @@ impl FnGen<'_, '_> {
                     }
                 }
                 aura_mir::Proj::VariantField { variant, field } => {
-                    if let Type::Enum(idx) = ty {
+                    if matches!(ty, Type::Enum(_) | Type::Result(..)) {
                         ty = self
-                            .layouts
-                            .get(idx as usize)
-                            .and_then(|l| l.as_ref())
-                            .and_then(|l| l.variants.get(*variant as usize))
+                            .layout_for(&ty)
+                            .and_then(|l| l.variants.get(*variant as usize).cloned())
                             .and_then(|v| v.field_tys.get(*field as usize).cloned())
                             .unwrap_or(Type::Error);
                     } else {
@@ -664,8 +671,8 @@ impl FnGen<'_, '_> {
                     }
                 }
                 aura_mir::Proj::VariantField { variant, field } => {
-                    if let Type::Enum(idx) = ty
-                        && let Some(l) = self.layouts.get(idx as usize).and_then(|l| l.as_ref())
+                    if matches!(ty, Type::Enum(_) | Type::Result(..))
+                        && let Some(l) = self.layout_for(&ty)
                         && let Some(vl) = l.variants.get(*variant as usize)
                     {
                         let off =

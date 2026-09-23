@@ -45,9 +45,12 @@ pub fn scalar_size_align(ty: &Type, ptr_size: u32) -> Option<(u32, u32)> {
             aura_semantic::FloatTy::F32 => (4, 4),
             aura_semantic::FloatTy::F64 => (8, 8),
         },
-        Type::Pointer { .. } | Type::Fn { .. } | Type::Str | Type::Struct(_) | Type::Enum(_) => {
-            (ptr_size, ptr_size)
-        }
+        Type::Pointer { .. }
+        | Type::Fn { .. }
+        | Type::Str
+        | Type::Struct(_)
+        | Type::Enum(_)
+        | Type::Result(..) => (ptr_size, ptr_size),
         Type::Unit | Type::Never | Type::Error | Type::Tuple(_) | Type::Var(_) => {
             return None;
         }
@@ -118,6 +121,39 @@ pub fn enum_layout(items: &FileItems, idx: u32, ptr_size: u32) -> Option<Layout>
     })
 }
 
+/// Layout of the built-in `Result<ok, err>` — the same tagged repr as a
+/// two-variant enum: `Ok` (variant 0) wraps `ok`, `Err` (variant 1)
+/// wraps `err`. `None` if either payload is unrepresentable.
+pub fn result_layout(items: &FileItems, ok: &Type, err: &Type, ptr_size: u32) -> Option<Layout> {
+    const TAG: u32 = 4; // i32 tag
+    let mut layouts = Vec::with_capacity(2);
+    let mut max_size = 0u32;
+    let mut max_align = 1u32;
+    for payload in [ok, err] {
+        let tys = vec![payload.clone()];
+        let (offsets, size, align) = layout_fields(items, &tys, ptr_size)?;
+        max_size = max_size.max(size);
+        max_align = max_align.max(align);
+        layouts.push(Layout {
+            size,
+            align,
+            offsets,
+            field_tys: tys,
+            payload_off: 0,
+            variants: Vec::new(),
+        });
+    }
+    let payload_off = align_to(TAG, max_align);
+    Some(Layout {
+        size: align_to(payload_off + max_size, max_align.max(TAG)),
+        align: max_align.max(TAG),
+        offsets: Vec::new(),
+        field_tys: Vec::new(),
+        payload_off,
+        variants: layouts,
+    })
+}
+
 /// Shared C-layout math: field offsets at natural alignment, total size
 /// padded to `align`. `None` if any field type is unrepresentable.
 fn layout_fields(
@@ -133,6 +169,10 @@ fn layout_fields(
         let (fs, fa) = match ty {
             Type::Struct(inner) | Type::Enum(inner) => {
                 let l = layout_of(items, *inner, ptr_size)?;
+                (l.size, l.align)
+            }
+            Type::Result(ok, err) => {
+                let l = result_layout(items, ok, err, ptr_size)?;
                 (l.size, l.align)
             }
             t => scalar_size_align(t, ptr_size)?,

@@ -23,7 +23,7 @@ use lasso::Spur;
 
 use crate::{
     BbId, Callee, Const, LocalId, MirBlock, MirBody, MirLocal, MirStmt, MirTerm, Operand, Place,
-    Proj, Rvalue,
+    Proj, RESULT_ITEM, Rvalue,
 };
 
 /// Lower `parsed.items[index]` to MIR. `None` for non-fn items and extern
@@ -389,11 +389,7 @@ impl Lowerer<'_> {
             }
             Expr::Match { scrutinee, arms } => self.match_expr(*scrutinee, arms, id),
             Expr::StructLit { name, fields } => self.struct_lit(*name, fields, id),
-            Expr::Try { expr } => {
-                let _ = self.expr(*expr);
-                self.unsupported("`?` operator", self.span(id));
-                Operand::Const(Const::Unit)
-            }
+            Expr::Try { expr } => self.try_expr(*expr),
         }
     }
 
@@ -418,9 +414,11 @@ impl Lowerer<'_> {
             {
                 self.enum_lit(e, vi, Vec::new(), id)
             }
-            // Bare fn/payload-variant used as a value — needs function
-            // pointers, deferred.
-            Some(Def::Fn(_) | Def::ExternFn(..) | Def::Variant(..)) => {
+            // Bare fn/payload-variant/`Ok`/`Err` used as a value — needs
+            // function pointers, deferred.
+            Some(
+                Def::Fn(_) | Def::ExternFn(..) | Def::Variant(..) | Def::ResultOk | Def::ResultErr,
+            ) => {
                 self.unsupported("function/variant values", self.span(id));
                 Operand::Const(Const::Unit)
             }
@@ -513,6 +511,16 @@ impl Lowerer<'_> {
                         let ops: Vec<Operand> = args.iter().map(|&a| self.expr(a)).collect();
                         return self.enum_lit(e, vi, ops, id);
                     }
+                    // Built-in `Ok`/`Err` — `Result` shares the enum repr;
+                    // the dest place's `Type::Result` drives layout.
+                    Some(Def::ResultOk | Def::ResultErr) => {
+                        let variant = u32::from(matches!(
+                            self.res.lookup(self.name(*name)),
+                            Some(Def::ResultErr)
+                        ));
+                        let ops: Vec<Operand> = args.iter().map(|&a| self.expr(a)).collect();
+                        return self.enum_lit(RESULT_ITEM, variant, ops, id);
+                    }
                     _ => {
                         for &a in args {
                             self.expr(a);
@@ -590,6 +598,67 @@ impl Lowerer<'_> {
         Operand::Place(Place::local(t))
     }
 
+    /// `e?` — desugars to a discriminant branch: `Ok` continues with the
+    /// payload place `scr.<v0>.0`; `Err` writes `_0 = Err(scr.<v1>.0)` and
+    /// returns. The error path diverges, so no join block is needed.
+    fn try_expr(&mut self, inner: ExprId) -> Operand {
+        let scr = self.expr(inner);
+        let scr_ty = self.expr_ty(inner).clone();
+        if !matches!(scr_ty, Type::Result(..)) {
+            // Typeck already diagnosed; emit something harmless.
+            return scr;
+        }
+        let scr_place = if let Operand::Place(p) = scr {
+            p
+        } else {
+            let t = self.temp(scr_ty);
+            self.assign(Place::local(t), Rvalue::Use(scr));
+            Place::local(t)
+        };
+        let ok_bb = self.new_block();
+        let err_bb = self.new_block();
+        let cond = self.variant_test(&scr_place, RESULT_ITEM, 0);
+        self.terminate(MirTerm::Branch {
+            cond,
+            then: ok_bb,
+            else_: err_bb,
+        });
+        // `Err(e)` → `_0 = Err(e); return` — the fn's declared return
+        // type is `Result`, so `_0`'s layout matches.
+        self.switch_to(err_bb);
+        let e_place = Place {
+            local: scr_place.local,
+            proj: {
+                let mut p = scr_place.proj.clone();
+                p.push(Proj::VariantField {
+                    variant: 1,
+                    field: 0,
+                });
+                p
+            },
+        };
+        self.assign(
+            Place::local(0),
+            Rvalue::EnumLit {
+                item: RESULT_ITEM,
+                variant: 1,
+                fields: vec![(0, Operand::Place(e_place))],
+            },
+        );
+        self.terminate(MirTerm::Return);
+        // `Ok(v)` → the payload place itself is the expression's value.
+        self.switch_to(ok_bb);
+        let mut proj = scr_place.proj;
+        proj.push(Proj::VariantField {
+            variant: 0,
+            field: 0,
+        });
+        Operand::Place(Place {
+            local: scr_place.local,
+            proj,
+        })
+    }
+
     // ----- match ------------------------------------------------------------------
 
     /// `match scr { arms }` — a linear test chain: each arm gets a test
@@ -624,7 +693,7 @@ impl Lowerer<'_> {
             }
             self.switch_to(arm_bb);
             self.scopes.push(IndexMap::new());
-            self.bind_pattern(&arm.pattern, &scr_place);
+            self.bind_pattern(&arm.pattern, &scr_place, &scr_ty);
             let op = self.expr(arm.body);
             if let Some(r) = res {
                 self.assign(Place::local(r), Rvalue::Use(op));
@@ -655,6 +724,8 @@ impl Lowerer<'_> {
                 let text = self.name(*n).to_owned();
                 match self.res.lookup(&text) {
                     Some(Def::Variant(e, vi)) => Some(self.variant_test(scr, e, vi)),
+                    Some(Def::ResultOk) => Some(self.variant_test(scr, RESULT_ITEM, 0)),
+                    Some(Def::ResultErr) => Some(self.variant_test(scr, RESULT_ITEM, 1)),
                     _ => None,
                 }
             }
@@ -669,10 +740,26 @@ impl Lowerer<'_> {
             }
             Pattern::Variant { name, args } => {
                 let text = self.name(*name).to_owned();
-                let Some(Def::Variant(e, vi)) = self.res.lookup(&text) else {
-                    return None; // unresolved — typeck already diagnosed
+                let (vi, payload): (u32, Vec<Type>) = match self.res.lookup(&text) {
+                    Some(Def::Variant(e, vi)) => (vi, enum_variant_payload(self.items, e, vi)),
+                    // `Ok`/`Err` — payload type is the scrutinee's `T`/`E`.
+                    Some(Def::ResultOk | Def::ResultErr) => {
+                        let vi = u32::from(matches!(self.res.lookup(&text), Some(Def::ResultErr)));
+                        let payload = match scr_ty {
+                            Type::Result(ok, err) => {
+                                vec![if vi == 0 {
+                                    (**ok).clone()
+                                } else {
+                                    (**err).clone()
+                                }]
+                            }
+                            _ => Vec::new(),
+                        };
+                        (vi, payload)
+                    }
+                    _ => return None, // unresolved — typeck already diagnosed
                 };
-                let mut cond = self.variant_test(scr, e, vi);
+                let mut cond = self.variant_test(scr, RESULT_ITEM, vi);
                 // Nested patterns in the payload refine the test.
                 for (i, sub) in args.iter().enumerate() {
                     let mut proj = scr.proj.clone();
@@ -684,10 +771,7 @@ impl Lowerer<'_> {
                         local: scr.local,
                         proj,
                     };
-                    let fty = enum_variant_payload(self.items, e, vi)
-                        .get(i)
-                        .cloned()
-                        .unwrap_or(Type::Error);
+                    let fty = payload.get(i).cloned().unwrap_or(Type::Error);
                     if let Some(sub) = self.match_test(sub, &sub_place, &fty) {
                         let both = self.temp(Type::Bool);
                         self.assign(Place::local(both), Rvalue::Binary(BinOp::And, cond, sub));
@@ -717,12 +801,15 @@ impl Lowerer<'_> {
 
     /// Install `pat`'s bindings in the current scope — runs inside the
     /// arm block, after the discriminant test proved the pattern.
-    fn bind_pattern(&mut self, pat: &Pattern, scr: &Place) {
+    fn bind_pattern(&mut self, pat: &Pattern, scr: &Place, scr_ty: &Type) {
         match pat {
             Pattern::Ident(n) => {
                 // Variant names don't bind — they're tested, not bound.
                 let text = self.name(*n).to_owned();
-                if matches!(self.res.lookup(&text), Some(Def::Variant(..))) {
+                if matches!(
+                    self.res.lookup(&text),
+                    Some(Def::Variant(..) | Def::ResultOk | Def::ResultErr)
+                ) {
                     return;
                 }
                 if let Some(s) = self.scopes.last_mut() {
@@ -731,10 +818,24 @@ impl Lowerer<'_> {
             }
             Pattern::Variant { name, args } => {
                 let text = self.name(*name).to_owned();
-                let Some(Def::Variant(e, vi)) = self.res.lookup(&text) else {
-                    return;
+                let (vi, payload): (u32, Vec<Type>) = match self.res.lookup(&text) {
+                    Some(Def::Variant(e, vi)) => (vi, enum_variant_payload(self.items, e, vi)),
+                    Some(Def::ResultOk | Def::ResultErr) => {
+                        let vi = u32::from(matches!(self.res.lookup(&text), Some(Def::ResultErr)));
+                        let payload = match scr_ty {
+                            Type::Result(ok, err) => {
+                                vec![if vi == 0 {
+                                    (**ok).clone()
+                                } else {
+                                    (**err).clone()
+                                }]
+                            }
+                            _ => Vec::new(),
+                        };
+                        (vi, payload)
+                    }
+                    _ => return,
                 };
-                let payload = enum_variant_payload(self.items, e, vi);
                 for (i, sub) in args.iter().enumerate() {
                     let mut proj = scr.proj.clone();
                     proj.push(Proj::VariantField {
@@ -745,15 +846,15 @@ impl Lowerer<'_> {
                         local: scr.local,
                         proj,
                     };
+                    let ty = payload.get(i).cloned().unwrap_or(Type::Error);
                     if let Pattern::Ident(n) = sub {
-                        let ty = payload.get(i).cloned().unwrap_or(Type::Error);
                         let l = self.new_local(ty, Some(self.name(*n).to_owned()), false);
                         self.assign(Place::local(l), Rvalue::Use(Operand::Place(sub_place)));
                         if let Some(s) = self.scopes.last_mut() {
                             s.insert(*n, l);
                         }
                     } else {
-                        self.bind_pattern(sub, &sub_place);
+                        self.bind_pattern(sub, &sub_place, &ty);
                     }
                 }
             }

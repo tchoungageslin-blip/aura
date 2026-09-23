@@ -116,6 +116,7 @@ fn unsupported_ty(t: &Type, items: &FileItems) -> bool {
         // An aggregate is supported iff a C-compatible layout exists for
         // it (all fields representable; enums additionally need a tag).
         Type::Struct(i) | Type::Enum(i) => layout_of(items, *i, 8).is_none(),
+        Type::Result(ok, err) => crate::layout::result_layout(items, ok, err, 8).is_none(),
         Type::Int(_)
         | Type::Float(_)
         | Type::Bool

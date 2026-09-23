@@ -137,6 +137,11 @@ pub enum Const {
     Unit,
 }
 
+/// [`Rvalue::EnumLit::item`] sentinel for the built-in `Result<T, E>`:
+/// there is no declaring `FileItems` index — the destination place's
+/// `Type::Result` drives layout. `Ok` is variant 0, `Err` variant 1.
+pub const RESULT_ITEM: u32 = u32::MAX;
+
 /// Right-hand side of an assignment.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Rvalue {

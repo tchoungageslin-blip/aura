@@ -278,9 +278,7 @@ impl Checker<'_> {
             Expr::Block(b) | Expr::Unsafe(b) => self.block(*b),
             Expr::Match { scrutinee, arms } => self.match_expr(*scrutinee, arms, id),
             Expr::StructLit { name, fields } => self.struct_lit(*name, fields, id),
-            // `e?` — deferred until `Result` generics land; passes the
-            // operand's type through unchecked.
-            Expr::Try { expr } => self.expr(*expr),
+            Expr::Try { expr } => self.try_expr(*expr, id),
         };
         self.set(id, &ty)
     }
@@ -303,6 +301,24 @@ impl Checker<'_> {
                         params: payload,
                         ret: Box::new(Type::Enum(e)),
                     }
+                }
+            }
+            // `Ok`/`Err` — generic constructor types; the arg unifies
+            // `T`/`E`, an expected `Result` pins the other side.
+            Some(Def::ResultOk) => {
+                let t = self.infer.new_var(VarKind::Any);
+                let e = self.infer.new_var(VarKind::Any);
+                Type::Fn {
+                    params: vec![t.clone()],
+                    ret: Box::new(Type::Result(Box::new(t), Box::new(e))),
+                }
+            }
+            Some(Def::ResultErr) => {
+                let t = self.infer.new_var(VarKind::Any);
+                let e = self.infer.new_var(VarKind::Any);
+                Type::Fn {
+                    params: vec![e.clone()],
+                    ret: Box::new(Type::Result(Box::new(t), Box::new(e))),
                 }
             }
             Some(Def::Struct(_) | Def::Enum(_)) => {
@@ -472,6 +488,40 @@ impl Checker<'_> {
             }
         }
         *ret
+    }
+
+    /// `e?` — unwraps `Result<T, E>` to `T`; on `Err` the function returns
+    /// early, so `E` must unify with the declared return type's error side.
+    fn try_expr(&mut self, inner: ExprId, id: ExprId) -> Type {
+        let t = self.expr(inner);
+        let Type::Result(ok, err) = self.infer.resolve(&t) else {
+            if !matches!(self.infer.resolve(&t), Type::Error) {
+                let found = self.ty_display(&t);
+                self.err(
+                    codes::SEM_TYPE_MISMATCH,
+                    format!(
+                        "the `?` operator can only be applied to `Result<T, E>`, found `{found}`"
+                    ),
+                    self.span(id),
+                );
+            }
+            return Type::Error;
+        };
+        // The function must return a compatible Result.
+        let expected = self.expected_ret.clone();
+        let Type::Result(_, ret_err) = self.infer.resolve(&expected) else {
+            let ret = self.ty_display(&expected);
+            self.err(
+                codes::SEM_TYPE_MISMATCH,
+                format!(
+                    "the `?` operator is only allowed in functions returning `Result`, found `{ret}`"
+                ),
+                self.span(id),
+            );
+            return Type::Error;
+        };
+        self.unify_at(&ret_err, &err, self.span(id));
+        *ok
     }
 
     fn field(&mut self, object: ExprId, field: Spur, id: ExprId) -> Type {
@@ -707,6 +757,21 @@ impl Checker<'_> {
                         );
                     }
                 }
+                Type::Result(..) => {
+                    let need = ["Ok", "Err"];
+                    let missing: Vec<&str> = need
+                        .iter()
+                        .filter(|n| !covered.iter().any(|c| c.as_str() == **n))
+                        .copied()
+                        .collect();
+                    if !missing.is_empty() {
+                        self.err(
+                            codes::SEM_NON_EXHAUSTIVE_MATCH,
+                            format!("non-exhaustive match: missing {}", missing.join(", ")),
+                            self.span(id),
+                        );
+                    }
+                }
                 // Infinite domains need a wildcard.
                 Type::Int(_) | Type::Str => self.err(
                     codes::SEM_NON_EXHAUSTIVE_MATCH,
@@ -739,6 +804,11 @@ impl Checker<'_> {
                 if let Some(Def::Variant(e, _)) = self.res.lookup(&text) {
                     covered.push(text);
                     self.unify_at(scrut, &Type::Enum(e), arm_span);
+                } else if let Some(Def::ResultOk | Def::ResultErr) = self.res.lookup(&text) {
+                    covered.push(text);
+                    let t = self.infer.new_var(VarKind::Any);
+                    let e = self.infer.new_var(VarKind::Any);
+                    self.unify_at(scrut, &Type::Result(Box::new(t), Box::new(e)), arm_span);
                 } else {
                     *has_wildcard = true;
                     self.bind(
@@ -777,6 +847,35 @@ impl Checker<'_> {
                                 format!(
                                     "variant `{text}` expects {} field(s), found {}",
                                     payload.len(),
+                                    args.len()
+                                ),
+                                arm_span,
+                            );
+                        }
+                        for (i, arg) in args.iter().enumerate() {
+                            let ty = payload.get(i).cloned().unwrap_or(Type::Error);
+                            let mut sink = Vec::new();
+                            let mut wc = false;
+                            self.check_pattern(arg, &ty, arm_span, &mut sink, &mut wc);
+                        }
+                    }
+                    // Built-in `Ok`/`Err` — payload comes from the
+                    // scrutinee's `Result<ok, err>` via fresh vars.
+                    Some(d @ (Def::ResultOk | Def::ResultErr)) => {
+                        covered.push(text.clone());
+                        let t = self.infer.new_var(VarKind::Any);
+                        let e = self.infer.new_var(VarKind::Any);
+                        let want = Type::Result(Box::new(t.clone()), Box::new(e.clone()));
+                        self.unify_at(scrut, &want, arm_span);
+                        let payload = [match d {
+                            Def::ResultOk => t,
+                            _ => e,
+                        }];
+                        if args.len() != 1 {
+                            self.err(
+                                codes::SEM_ARG_COUNT,
+                                format!(
+                                    "variant `{text}` expects 1 field(s), found {}",
                                     args.len()
                                 ),
                                 arm_span,
@@ -867,10 +966,16 @@ impl Checker<'_> {
                     pointee: Box::new(self.lower_ast_ty(pointee)),
                 }
             }
-            TypeExpr::Named { name, .. } => {
+            TypeExpr::Named { name, generic_args } => {
                 let text = self.name(*name).to_owned();
                 match ty::primitive(&text) {
                     Some(t) => t,
+                    // Built-in `Result<T, E>` annotation.
+                    None if text == "Result" && generic_args.len() == 2 => {
+                        let t = self.lower_ast_ty(generic_args[0]);
+                        let e = self.lower_ast_ty(generic_args[1]);
+                        Type::Result(Box::new(t), Box::new(e))
+                    }
                     None => match self.res.lookup(&text) {
                         Some(Def::Struct(i)) => Type::Struct(i),
                         Some(Def::Enum(i)) => Type::Enum(i),
@@ -903,9 +1008,18 @@ pub fn lower_typename(items: &FileItems, tn: &TypeName) -> Type {
             mutable: *mutable,
             pointee: Box::new(lower_typename(items, pointee)),
         },
-        TypeName::Named { name, .. } => {
+        TypeName::Named { name, args } => {
             if let Some(t) = ty::primitive(name) {
                 return t;
+            }
+            // Built-in `Result<T, E>` — not a file item, resolved here.
+            if name == "Result"
+                && let [t, e] = args.as_slice()
+            {
+                return Type::Result(
+                    Box::new(lower_typename(items, t)),
+                    Box::new(lower_typename(items, e)),
+                );
             }
             match items.find(name) {
                 Some(i) => match items.items.get(i as usize) {

@@ -99,3 +99,25 @@ fn str_literal_blocks_codegen() {
             .any(|d| d.code == Some(aura_common::codes::CG_UNSUPPORTED))
     );
 }
+
+#[test]
+fn result_and_try_emit_object() {
+    let out = compile(
+        "fn inner(ok: bool) -> Result<i64, i64> { if ok { Ok(1) } else { Err(2) } }\n\
+         fn outer(ok: bool) -> Result<i64, i64> { let v = inner(ok)?\n Ok(v + 1) }\n\
+         fn main() -> i64 { match outer(true) { Ok(v) => v, Err(e) => e } }",
+    );
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    assert!(out.object.is_some());
+}
+
+#[test]
+fn result_param_and_struct_field_emit() {
+    let out = compile(
+        "struct B { r: Result<i64, i64> }\n\
+         fn unwrap(r: Result<i64, i64>) -> i64 { match r { Ok(v) => v, Err(e) => e } }\n\
+         fn main() -> i64 { let b = B { r: Ok(9) }\n unwrap(b.r) }",
+    );
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    assert!(out.object.is_some());
+}

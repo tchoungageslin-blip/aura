@@ -53,6 +53,7 @@ fn ty_name(t: &aura_semantic::Type) -> String {
         Type::Float(f) => f.name().into(),
         Type::Str => "str".into(),
         Type::Struct(i) | Type::Enum(i) => format!("#{i}"),
+        Type::Result(ok, err) => format!("Result<{}, {}>", ty_name(ok), ty_name(err)),
         Type::Fn { .. } => "fn(..)".into(),
         Type::Tuple(_) => "(..)".into(),
         Type::Pointer { .. } => "*_".into(),
@@ -161,7 +162,12 @@ fn rvalue(r: &Rvalue) -> String {
                 .iter()
                 .map(|(i, o)| format!("{i}: {}", operand(o)))
                 .collect();
-            format!("enum#{item}::v{variant} {{ {} }}", f.join(", "))
+            if *item == crate::RESULT_ITEM {
+                let v = if *variant == 0 { "Ok" } else { "Err" };
+                format!("Result::{v} {{ {} }}", f.join(", "))
+            } else {
+                format!("enum#{item}::v{variant} {{ {} }}", f.join(", "))
+            }
         }
         Rvalue::Discriminant(p) => format!("disc({})", place(p)),
     }
