@@ -233,6 +233,11 @@ fn declare_builtins(
                 sig.params.extend([AbiParam::new(ptr); 2]); // str → {ptr, len}
             }
             BuiltinFn::Exit => sig.params.push(AbiParam::new(types::I64)),
+            // (x: f64) -> f64 — the runtime's libc-compatible `sqrt`.
+            BuiltinFn::Sqrt => {
+                sig.params.push(AbiParam::new(types::F64));
+                sig.returns.push(AbiParam::new(types::F64));
+            }
             // (data, len, cap, elem_ptr, elem_size, cap_out) -> data'
             BuiltinFn::VecPush => {
                 sig.params.extend([AbiParam::new(ptr); 6]);
@@ -733,6 +738,13 @@ impl FnGen<'_, '_> {
                 let Some(op) = args.first() else { return };
                 let v = self.operand_val(op);
                 self.call_builtin_sym(b, &[v]);
+            }
+            BuiltinFn::Sqrt => {
+                let Some(op) = args.first() else { return };
+                let v = self.operand_val(op);
+                if let Some(r) = self.call_builtin_sym(b, &[v]) {
+                    self.store(dest, r);
+                }
             }
             BuiltinFn::VecNew => {
                 // `vec<T>` = `{ptr: 0, len: 0, cap: 0}` — an unallocated

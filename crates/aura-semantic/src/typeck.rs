@@ -21,7 +21,7 @@ use lasso::Spur;
 
 use crate::infer::{InferCtx, VarKind};
 use crate::resolve::{Def, Resolution, resolved_file, resolved_project};
-use crate::ty::{self, IntTy, Type};
+use crate::ty::{self, FloatTy, IntTy, Type};
 
 /// Result of checking one function body.
 #[derive(Debug, Clone, PartialEq)]
@@ -1169,6 +1169,10 @@ fn builtin_fn_type(infer: &mut InferCtx, b: BuiltinFn) -> Type {
         BuiltinFn::Exit => Type::Fn {
             params: vec![Type::Int(IntTy::I64)],
             ret: Box::new(Type::Never),
+        },
+        BuiltinFn::Sqrt => Type::Fn {
+            params: vec![Type::Float(FloatTy::F64)],
+            ret: Box::new(Type::Float(FloatTy::F64)),
         },
         BuiltinFn::VecNew => {
             let t = infer.new_var(VarKind::Any);

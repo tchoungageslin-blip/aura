@@ -1,0 +1,55 @@
+// nbody — 3-body gravitational integration over f64 fields;
+// exercises float math and vec<struct> element updates.
+struct Body { x: f64, y: f64, z: f64, vx: f64, vy: f64, vz: f64, mass: f64 }
+
+fn advance(bodies: vec<Body>, dt: f64) {
+    let n = bodies.len
+    let mut i = 0
+    while i < n {
+        let mut j = i + 1
+        while j < n {
+            let bi = vec_get(bodies, i)
+            let bj = vec_get(bodies, j)
+            let dx = bi.x - bj.x
+            let dy = bi.y - bj.y
+            let dz = bi.z - bj.z
+            let d2 = dx * dx + dy * dy + dz * dz
+            let mag = dt / (d2 * sqrt(d2))
+            let fi = bj.mass * mag
+            let fj = bi.mass * mag
+            vec_set(bodies, i, Body {
+                x: bi.x, y: bi.y, z: bi.z, mass: bi.mass,
+                vx: bi.vx - dx * fi, vy: bi.vy - dy * fi, vz: bi.vz - dz * fi,
+            })
+            vec_set(bodies, j, Body {
+                x: bj.x, y: bj.y, z: bj.z, mass: bj.mass,
+                vx: bj.vx + dx * fj, vy: bj.vy + dy * fj, vz: bj.vz + dz * fj,
+            })
+            j = j + 1
+        }
+        i = i + 1
+    }
+    let mut k = 0
+    while k < n {
+        let b = vec_get(bodies, k)
+        vec_set(bodies, k, Body {
+            mass: b.mass, vx: b.vx, vy: b.vy, vz: b.vz,
+            x: b.x + dt * b.vx, y: b.y + dt * b.vy, z: b.z + dt * b.vz,
+        })
+        k = k + 1
+    }
+}
+
+fn main() -> i64 {
+    let bodies = vec_new()
+    vec_push(bodies, Body { x: 0.0, y: 0.0, z: 0.0, vx: 0.0, vy: 0.0, vz: 0.0, mass: 1.0 })
+    vec_push(bodies, Body { x: 1.0, y: 0.0, z: 0.0, vx: 0.0, vy: 0.5, vz: 0.0, mass: 0.001 })
+    vec_push(bodies, Body { x: -1.0, y: 0.0, z: 0.0, vx: 0.0, vy: -0.5, vz: 0.0, mass: 0.001 })
+    let mut step = 0
+    while step < 2000 {
+        advance(bodies, 0.001)
+        step = step + 1
+    }
+    let e = vec_get(bodies, 0)
+    if e.mass == 1.0 && e.x > -1.0 && e.x < 1.0 { 0 } else { 1 }
+}

@@ -46,6 +46,14 @@ enum Command {
     Run { path: Option<PathBuf> },
     /// Interpret `main` directly (no codegen) and forward its exit code.
     Interp { path: Option<PathBuf> },
+    /// Benchmark `main`: wall-clock `iters` runs of the compiled
+    /// executable and of the reference interpreter, then report.
+    Bench {
+        path: Option<PathBuf>,
+        /// Runs per engine (default 3).
+        #[arg(short, long, default_value_t = 3)]
+        iters: u32,
+    },
     /// Start the Language Server Protocol server over stdio.
     Lsp,
     /// Format a file or every source unit of a project canonically
@@ -72,6 +80,7 @@ fn main() -> ExitCode {
         Command::Run { path } => run(&or_cwd(path)),
         Command::Lsp => ExitCode::from(u8::try_from(aura_lsp::serve()).unwrap_or(1)),
         Command::Interp { path } => interp(&or_cwd(path)),
+        Command::Bench { path, iters } => bench(&or_cwd(path), iters),
         Command::Fmt {
             path,
             check,
@@ -367,22 +376,30 @@ fn fmt_one(path: &Path, check: bool, to_stdout: bool) -> ExitCode {
     }
 }
 
-fn run(path: &Path) -> ExitCode {
-    let Some((obj_bytes, _cache)) = compile(path) else {
-        return ExitCode::FAILURE;
-    };
-    // Link under a temp dir; clean up best-effort.
+/// Compile `path` and link it into a fresh temp-dir executable.
+/// Returns `(temp_dir, exe)` — removing `temp_dir` cleans both files.
+fn link_temp_exe(obj_bytes: &[u8]) -> Option<(PathBuf, PathBuf)> {
     let dir = std::env::temp_dir().join(format!("aura-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
     let obj = dir.join("out.obj");
     let exe = dir.join(if cfg!(windows) { "out.exe" } else { "out" });
-    if let Err(e) = std::fs::write(&obj, &obj_bytes) {
+    if let Err(e) = std::fs::write(&obj, obj_bytes) {
         eprintln!("error: cannot write {}: {e}", obj.display());
-        return ExitCode::FAILURE;
+        return None;
     }
     if link(&obj, &exe) == ExitCode::FAILURE {
-        return ExitCode::FAILURE;
+        return None;
     }
+    Some((dir, exe))
+}
+
+fn run(path: &Path) -> ExitCode {
+    let Some((obj_bytes, _cache)) = compile(path) else {
+        return ExitCode::FAILURE;
+    };
+    let Some((dir, exe)) = link_temp_exe(&obj_bytes) else {
+        return ExitCode::FAILURE;
+    };
     let status = std::process::Command::new(&exe).status();
     let _ = std::fs::remove_dir_all(&dir);
     match status {
@@ -393,5 +410,86 @@ fn run(path: &Path) -> ExitCode {
             eprintln!("error: cannot run {}: {e}", exe.display());
             ExitCode::FAILURE
         }
+    }
+}
+
+fn bench(path: &Path, iters: u32) -> ExitCode {
+    let iters = iters.max(1);
+    let Some((obj_bytes, _cache)) = compile(path) else {
+        return ExitCode::FAILURE;
+    };
+    let Some((dir, exe)) = link_temp_exe(&obj_bytes) else {
+        return ExitCode::FAILURE;
+    };
+    let mut compiled: Vec<f64> = Vec::with_capacity(iters as usize);
+    let mut compiled_code: Option<i32> = None;
+    for _ in 0..iters {
+        let t = std::time::Instant::now();
+        match std::process::Command::new(&exe).status() {
+            Ok(s) => {
+                compiled_code = s.code();
+                compiled.push(t.elapsed().as_secs_f64() * 1000.0);
+            }
+            Err(e) => {
+                eprintln!("error: cannot run {}: {e}", exe.display());
+                let _ = std::fs::remove_dir_all(&dir);
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // Interpreter runs in-process on the same project.
+    let (db, project, cache) = match load_project(path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if render(check_project(&db, project).as_slice(), &cache) {
+        return ExitCode::FAILURE;
+    }
+    let mut interp_ms: Vec<f64> = Vec::with_capacity(iters as usize);
+    let mut interp_code: Option<i64> = None;
+    for _ in 0..iters {
+        let t = std::time::Instant::now();
+        match aura_interp::run_project(&db, project) {
+            Ok(v) => {
+                interp_code = Some(v);
+                interp_ms.push(t.elapsed().as_secs_f64() * 1000.0);
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+
+    let stats = |ts: &[f64]| {
+        let min = ts.iter().copied().fold(f64::INFINITY, f64::min);
+        let n = u32::try_from(ts.len()).unwrap_or(u32::MAX).max(1);
+        let avg = ts.iter().sum::<f64>() / f64::from(n);
+        (min, avg)
+    };
+    let (cmin, cavg) = stats(&compiled);
+    let (imin, iavg) = stats(&interp_ms);
+    println!("bench {}", path.display());
+    println!(
+        "  compiled: {} runs, min {cmin:.1}ms avg {cavg:.1}ms (exit {:?})",
+        compiled.len(),
+        compiled_code
+    );
+    println!(
+        "  interp:   {} runs, min {imin:.1}ms avg {iavg:.1}ms (exit {:?})",
+        interp_ms.len(),
+        interp_code
+    );
+    let agree = compiled_code.map(i64::from) == interp_code;
+    println!("  exit codes {}", if agree { "agree" } else { "DIFFER" });
+    if agree {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
     }
 }

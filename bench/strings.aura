@@ -1,0 +1,11 @@
+// strings — `str +` heap concat under a hot loop; exercises
+// aura_str_concat allocation + memcpy throughput.
+fn main() -> i64 {
+    let mut s: str = ""
+    let mut i = 0
+    while i < 1500 {
+        s = s + "ab"
+        i = i + 1
+    }
+    if s.len == 3000 { 0 } else { 1 }
+}

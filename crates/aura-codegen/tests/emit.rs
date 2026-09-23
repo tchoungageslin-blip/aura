@@ -164,6 +164,17 @@ fn builtin_print_imports_aura_rt_println() {
 }
 
 #[test]
+fn builtin_sqrt_imports_sqrt() {
+    let out = compile("fn main() -> i64 { if sqrt(4.0) == 2.0 { 1 } else { 0 } }");
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    let obj = out.object.expect("object expected");
+    assert!(
+        obj.windows(4).any(|w| w == b"sqrt"),
+        "object must import sqrt"
+    );
+}
+
+#[test]
 fn str_add_imports_aura_str_concat() {
     let out =
         compile("fn main() -> i64 { let s = \"a\" + \"b\"\n if s == \"ab\" { 1 } else { 0 } }");

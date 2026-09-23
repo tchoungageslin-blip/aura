@@ -166,6 +166,52 @@ pub fn run_project(
 }
 
 fn run_files(files: &[&aura_parser::ParsedFile]) -> Result<i64, InterpError> {
+    // Deep Aura recursion is Rust recursion here — the default 1–8 MB
+    // thread stack overflows on real programs (fib(25) ≈ 240k calls).
+    // Run on a dedicated 256 MB stack; `scope` joins before returning.
+    // `InterpError` isn't `Send` (Rc inside `Value`), so it crosses the
+    // thread boundary as a `(tag, msg)` pair.
+    std::thread::scope(|s| {
+        std::thread::Builder::new()
+            .stack_size(256 * 1024 * 1024)
+            .spawn_scoped(s, || run_files_inner(files).map_err(|e| encode_err(&e)))
+            .map_err(|_| InterpError::Unsupported("spawn interp thread"))?
+            .join()
+            .unwrap_or_else(|_| Err((255, "interp thread panicked".into())))
+            .map_err(|(t, m)| decode_err(t, m))
+    })
+}
+
+fn encode_err(e: &InterpError) -> (u8, String) {
+    match e {
+        InterpError::DivByZero => (0, String::new()),
+        InterpError::NoMain => (1, String::new()),
+        InterpError::Type(m) => (2, m.clone()),
+        InterpError::Unsupported(s) => (3, (*s).into()),
+        InterpError::StepLimit => (4, String::new()),
+        InterpError::Unresolved(s) => (5, s.clone()),
+        InterpError::Escape(Escape::Break) => (6, String::new()),
+        InterpError::Escape(Escape::Continue) => (7, String::new()),
+        InterpError::Escape(other) => (8, format!("{other:?}")),
+    }
+}
+
+fn decode_err(tag: u8, msg: String) -> InterpError {
+    match tag {
+        0 => InterpError::DivByZero,
+        1 => InterpError::NoMain,
+        2 => InterpError::Type(msg),
+        3 => InterpError::Unsupported("unsupported construct"),
+        4 => InterpError::StepLimit,
+        5 => InterpError::Unresolved(msg),
+        6 => InterpError::Escape(Escape::Break),
+        7 => InterpError::Escape(Escape::Continue),
+        8 => InterpError::Type(format!("unhandled escape: {msg}")),
+        _ => InterpError::Type(format!("wire {tag}: {msg}")),
+    }
+}
+
+fn run_files_inner(files: &[&aura_parser::ParsedFile]) -> Result<i64, InterpError> {
     let mut interp = Interp::new(files);
     match interp.call_main() {
         Ok(Value::Int(v)) => {

@@ -464,6 +464,21 @@ fn user_def_shadows_builtin() {
 }
 
 #[test]
+fn builtin_sqrt_clean() {
+    // `sqrt` is a prelude builtin — no extern decl required.
+    let src = "fn main() -> i64 { let x = sqrt(9.0)\n if x == 3.0 { 1 } else { 0 } }";
+    assert!(diags(src).is_empty(), "{:?}", diags(src));
+}
+
+#[test]
+fn builtin_sqrt_arg_mismatch() {
+    assert_has(
+        "fn main() -> i64 { sqrt(\"x\")\n 0 }",
+        codes::SEM_TYPE_MISMATCH,
+    );
+}
+
+#[test]
 fn str_add_concat_clean() {
     let src = "fn main() -> i64 { let s = \"a\" + \"b\"\n if s == \"ab\" { 1 } else { 0 } }";
     assert!(diags(src).is_empty(), "{:?}", diags(src));

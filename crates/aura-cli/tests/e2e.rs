@@ -467,3 +467,39 @@ fn project_no_args_uses_cwd_manifest() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+#[test]
+fn run_nbody_returns_0() {
+    // bench/nbody.aura exercises the `sqrt` prelude builtin end-to-end.
+    if runtime_lib().is_none() {
+        return;
+    }
+    let path = repo_root().join("bench/nbody.aura");
+    let out = aura(&["run", path.to_str().unwrap()]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn bench_smoke_compiled_and_interp() {
+    // `aura bench` must time both engines and confirm parity.
+    if runtime_lib().is_none() {
+        return;
+    }
+    let path = repo_root().join("bench/strings.aura");
+    let out = aura(&["bench", path.to_str().unwrap(), "-i", "1"]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("compiled:"), "stdout: {stdout}");
+    assert!(stdout.contains("interp:"), "stdout: {stdout}");
+    assert!(stdout.contains("exit codes agree"), "stdout: {stdout}");
+}

@@ -29,6 +29,8 @@ pub enum BuiltinFn {
     Eprintln,
     /// `exit(code: i64) -> !` — terminate the process.
     Exit,
+    /// `sqrt(x: f64) -> f64` — hardware square root.
+    Sqrt,
     /// `vec_new<T>() -> vec<T>` — empty `{ptr: 0, len: 0, cap: 0}`.
     VecNew,
     /// `vec_push<T>(v: vec<T>, x: T)` — grow + append in place.
@@ -51,6 +53,7 @@ impl BuiltinFn {
         Self::Eprint,
         Self::Eprintln,
         Self::Exit,
+        Self::Sqrt,
         Self::VecNew,
         Self::VecPush,
         Self::VecGet,
@@ -67,6 +70,7 @@ impl BuiltinFn {
             Self::Eprint => "eprint",
             Self::Eprintln => "eprintln",
             Self::Exit => "exit",
+            Self::Sqrt => "sqrt",
             Self::VecNew => "vec_new",
             Self::VecPush => "vec_push",
             Self::VecGet => "vec_get",
@@ -86,6 +90,7 @@ impl BuiltinFn {
             Self::Eprint => "aura_rt_eprint",
             Self::Eprintln => "aura_rt_eprintln",
             Self::Exit => "aura_rt_exit",
+            Self::Sqrt => "sqrt",
             Self::VecPush => "aura_vec_push",
             Self::VecGet => "aura_vec_get",
             Self::Args => "aura_rt_args",

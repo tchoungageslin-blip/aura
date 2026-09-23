@@ -1,0 +1,25 @@
+// bintree — arena binary tree in a vec<Node>; exercises aggregate
+// element copies, vec growth, and recursive descent.
+struct Node { leaf: bool, l: usize, r: usize }
+
+fn build(v: vec<Node>, depth: i64) -> usize {
+    let id = v.len
+    vec_push(v, Node { leaf: depth == 0, l: 0, r: 0 })
+    if depth > 0 {
+        let l = build(v, depth - 1)
+        let r = build(v, depth - 1)
+        vec_set(v, id, Node { leaf: false, l: l, r: r })
+    }
+    id
+}
+
+fn count(v: vec<Node>, n: usize) -> i64 {
+    let node = vec_get(v, n)
+    if node.leaf { 1 } else { 1 + count(v, node.l) + count(v, node.r) }
+}
+
+fn main() -> i64 {
+    let v = vec_new()
+    let root = build(v, 14)
+    if count(v, root) == 32767 { 0 } else { 1 }
+}

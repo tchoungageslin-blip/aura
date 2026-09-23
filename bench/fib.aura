@@ -1,0 +1,8 @@
+// fib — deep recursion; exercises call frame setup/teardown.
+fn fib(n: i64) -> i64 {
+    if n < 2 { n } else { fib(n - 1) + fib(n - 2) }
+}
+
+fn main() -> i64 {
+    if fib(25) == 75025 { 0 } else { 1 }
+}
