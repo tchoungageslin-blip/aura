@@ -255,3 +255,49 @@ fn build_rejects_bad_source() {
     let out = aura(&["build", fixture("bad.aura").to_str().unwrap()]);
     assert!(!out.status.success());
 }
+
+/// Differential: `aura interp` (tree-walk reference) must agree with
+/// `aura run` (Cranelift COFF) on the observable exit code.
+#[test]
+fn differential_interp_matches_compiled() {
+    if runtime_lib().is_none() {
+        return;
+    }
+    for name in ["hello.aura", "enum.aura", "result.aura"] {
+        let path = fixture(name);
+        let path = path.to_str().unwrap();
+        let compiled = aura(&["run", path]);
+        let interp = aura(&["interp", path]);
+        assert_eq!(
+            compiled.status.code(),
+            interp.status.code(),
+            "{name}: compiled={:?} interp={:?} interp_stderr={}",
+            compiled.status.code(),
+            interp.status.code(),
+            String::from_utf8_lossy(&interp.stderr)
+        );
+    }
+}
+
+#[test]
+fn interp_reports_diagnostics_on_bad_source() {
+    let out = aura(&["interp", fixture("bad.aura").to_str().unwrap()]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("E2001"));
+}
+
+#[test]
+fn interp_propagates_exit_code() {
+    let dir = std::env::temp_dir().join(format!("aura-e2e-interp-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let src = dir.join("ret7.aura");
+    std::fs::write(&src, "fn main() -> i64 { 7 }\n").unwrap();
+    let out = aura(&["interp", src.to_str().unwrap()]);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(
+        out.status.code(),
+        Some(7),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

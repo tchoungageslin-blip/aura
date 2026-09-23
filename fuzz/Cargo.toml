@@ -1,0 +1,73 @@
+[package]
+name = "aura-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+# Standalone workspace — fuzz builds use libFuzzer's sanitizer flags and must
+# not leak into the main workspace's lockfile/build.
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+aura-lexer = { path = "../crates/aura-lexer" }
+aura-parser = { path = "../crates/aura-parser" }
+aura-common = { path = "../crates/aura-common" }
+aura-salsa-db = { path = "../crates/aura-salsa-db" }
+aura-semantic = { path = "../crates/aura-semantic" }
+aura-mir = { path = "../crates/aura-mir" }
+aura-codegen = { path = "../crates/aura-codegen" }
+aura-fmt = { path = "../crates/aura-fmt" }
+aura-interp = { path = "../crates/aura-interp" }
+
+[[bin]]
+name = "lexer"
+path = "fuzz_targets/lexer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parser"
+path = "fuzz_targets/parser.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "semantic"
+path = "fuzz_targets/semantic.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mir"
+path = "fuzz_targets/mir.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "codegen"
+path = "fuzz_targets/codegen.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fmt_roundtrip"
+path = "fuzz_targets/fmt_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "interp"
+path = "fuzz_targets/interp.rs"
+test = false
+doc = false
+bench = false

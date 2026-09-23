@@ -15,6 +15,7 @@ path = "src/main.rs"
 aura-codegen.workspace = true
 aura-common.workspace = true
 aura-fmt.workspace = true
+aura-interp.workspace = true
 aura-lsp.workspace = true
 aura-linker.workspace = true
 aura-mir.workspace = true

@@ -1,0 +1,710 @@
+//! `aura-interp` — reference tree-walk interpreter for Aura.
+//!
+//! Purpose: differential testing. [`run_source`] parses, semantically checks,
+//! then interprets `main()` — its result is the ground truth that compiled
+//! executables are compared against in fuzz/tests. It is deliberately simple
+//! (clone-heavy, no GC): correctness over speed.
+//!
+//! Supported: ints, floats, bools, `str` literals, unit; `fn` calls;
+//! structs, enums + `match`, `Result`/`?`; `if`/`while`/`loop`/`break`/
+//! `continue`/`return`; `unsafe` blocks (interpreted normally); `extern`
+//! calls dispatch to a small builtin table (`sqrt`).
+//!
+//! Unsupported (→ [`InterpError::Unsupported`]): raw pointers, extern fns with
+//! no builtin, `use` items (no module loader yet).
+
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+
+use aura_ast::{BinOp, Block, Expr, ExprId, Item, Literal, Pattern, Stmt, StmtId, UnOp};
+use aura_common::{Diagnostic, SourceCache};
+use lasso::Spur;
+
+/// Runtime value. `Struct`/`Variant` payloads are positional.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Value {
+    Int(i128),
+    Float(f64),
+    Bool(bool),
+    Str(String),
+    Unit,
+    Struct {
+        name: String,
+        fields: Vec<Value>,
+    },
+    Variant {
+        enum_name: String,
+        variant: String,
+        fields: Vec<Value>,
+    },
+}
+
+impl Value {
+    fn truthy(&self) -> Result<bool, InterpError> {
+        match self {
+            Value::Bool(b) => Ok(*b),
+            v => Err(InterpError::Type(format!("expected bool, found {v:?}"))),
+        }
+    }
+}
+
+/// A runtime fault inside interpreted code, or a construct the interpreter
+/// does not model.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InterpError {
+    /// Integer division/remainder by zero — mirrors the codegen trap.
+    DivByZero,
+    /// `main` missing or not a `fn main() -> i64`.
+    NoMain,
+    /// Expression produced a value of the wrong kind (post-check this means
+    /// an interpreter bug or an unchecked path).
+    Type(String),
+    /// Feature exists in the language but not in the interpreter.
+    Unsupported(&'static str),
+    /// Fuel exhausted — runaway `loop`/`while` protection for fuzzing.
+    StepLimit,
+    /// A name did not resolve (should be impossible after `check_file`).
+    Unresolved(String),
+    /// Internal channel: `return`/`break`/`continue`/`?`-on-`Err` surfacing
+    /// out of an expression-context block. `block()` converts these back to
+    /// [`Flow`]; `call_fn` converts `Return` into the fn's result.
+    #[doc(hidden)]
+    Escape(Escape),
+}
+
+impl fmt::Display for InterpError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InterpError::DivByZero => write!(f, "division by zero"),
+            InterpError::NoMain => write!(f, "no `fn main() -> i64`"),
+            InterpError::Type(m) => write!(f, "type error: {m}"),
+            InterpError::Unsupported(w) => write!(f, "unsupported: {w}"),
+            InterpError::StepLimit => write!(f, "step limit exceeded"),
+            InterpError::Unresolved(n) => write!(f, "unresolved name `{n}`"),
+            InterpError::Escape(_) => write!(f, "uncaught control flow"),
+        }
+    }
+}
+
+impl std::error::Error for InterpError {}
+
+/// Failure before or during interpretation.
+#[derive(Debug)]
+pub enum RunError {
+    /// Frontend diagnostics (parse/resolve/typeck).
+    Diagnostics(Vec<Diagnostic>),
+    /// Runtime fault.
+    Interp(InterpError),
+}
+
+impl fmt::Display for RunError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RunError::Diagnostics(d) => write!(f, "{} diagnostic(s)", d.len()),
+            RunError::Interp(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for RunError {}
+
+/// Parse, check, and interpret `src`'s `main`. Returns `main`'s `i64`.
+///
+/// # Errors
+///
+/// - [`RunError::Diagnostics`] when `check_file` reports errors.
+/// - [`RunError::Interp`] on runtime faults or unsupported constructs.
+pub fn run_source(src: &str) -> Result<i64, RunError> {
+    let mut cache = SourceCache::new();
+    let file_id = cache.add("<interp>".to_owned(), src.to_owned());
+    let parsed = aura_parser::parse_file(src, file_id);
+
+    // Semantic check via the salsa pipeline (same as `aura check`).
+    let db = aura_salsa_db::AuraDatabase::new();
+    let file = aura_salsa_db::SourceFile::new(&db, src.to_owned(), file_id);
+    let diags = aura_semantic::check_file(&db, file);
+    if diags.iter().any(Diagnostic::is_error) {
+        return Err(RunError::Diagnostics(diags.clone()));
+    }
+
+    run_parsed(&parsed).map_err(RunError::Interp)
+}
+
+/// Interpret `parsed`'s `main` (caller has already checked semantics).
+/// Useful when the caller wants the [`aura_parser::ParsedFile`] for other
+/// purposes.
+///
+/// # Errors
+/// See [`run_source`].
+pub fn run_parsed(parsed: &aura_parser::ParsedFile) -> Result<i64, InterpError> {
+    let mut interp = Interp::new(parsed);
+    match interp.call_main()? {
+        Value::Int(v) => {
+            i64::try_from(v).map_err(|_| InterpError::Type("main result out of i64 range".into()))
+        }
+        v => Err(InterpError::Type(format!("main returned {v:?}"))),
+    }
+}
+
+/// Non-value control flow out of a block/statement.
+enum Flow {
+    Value(Value),
+    Return(Value),
+    Break,
+    Continue,
+}
+
+/// An escape bubbling through expression position — `return`, `break`,
+/// `continue`, and `expr?` on `Err` all surface this way when the innermost
+/// enclosing construct is an expression rather than a statement loop.
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq)]
+pub enum Escape {
+    Return(Value),
+    Break,
+    Continue,
+}
+
+impl Escape {
+    fn into_flow(self) -> Flow {
+        match self {
+            Escape::Return(v) => Flow::Return(v),
+            Escape::Break => Flow::Break,
+            Escape::Continue => Flow::Continue,
+        }
+    }
+}
+
+/// Extern functions the interpreter can execute without FFI.
+#[derive(Debug, Clone, Copy)]
+enum Builtin {
+    Sqrt,
+}
+
+/// The interpreter: item tables plus a scope stack and fuel.
+struct Interp<'a> {
+    parsed: &'a aura_parser::ParsedFile,
+    /// `fn name` → item index in `parsed.items`.
+    fns: HashMap<String, usize>,
+    /// `struct name` → field names in declared order.
+    structs: HashMap<String, Vec<Spur>>,
+    /// `variant name` → `(enum name, payload arity)`.
+    variants: HashMap<String, (String, usize)>,
+    /// `extern fn` names the interpreter can execute (see [`Builtin`]).
+    builtins: HashSet<String>,
+    scopes: Vec<HashMap<Spur, Value>>,
+    steps: u64,
+}
+
+const STEP_LIMIT: u64 = 5_000_000;
+
+impl<'a> Interp<'a> {
+    fn new(parsed: &'a aura_parser::ParsedFile) -> Self {
+        let mut this = Self {
+            parsed,
+            fns: HashMap::new(),
+            structs: HashMap::new(),
+            variants: HashMap::new(),
+            builtins: HashSet::new(),
+            scopes: vec![HashMap::new()],
+            steps: 0,
+        };
+        for (i, item) in parsed.items.iter().enumerate() {
+            match item {
+                Item::Function(f) if !f.is_extern => {
+                    this.fns.insert(this.name_of(f.name), i);
+                }
+                Item::Struct(s) => {
+                    let fields = s.fields.iter().map(|f| f.name).collect();
+                    this.structs.insert(this.name_of(s.name), fields);
+                }
+                Item::Enum(e) => {
+                    let ename = this.name_of(e.name);
+                    for v in &e.variants {
+                        let arity = match &v.payload {
+                            aura_ast::VariantPayload::None => 0,
+                            aura_ast::VariantPayload::Tuple(ts) => ts.len(),
+                        };
+                        this.variants
+                            .insert(this.name_of(v.name), (ename.clone(), arity));
+                    }
+                }
+                Item::ExternBlock { fns, .. } => {
+                    for f in fns {
+                        let name = this.name_of(f.name);
+                        if Builtin::by_name(&name).is_some() {
+                            this.builtins.insert(name);
+                        }
+                    }
+                }
+                Item::Function(_) | Item::Use { .. } | Item::Error { .. } => {}
+            }
+        }
+        // Built-in `Result` constructors — single-payload variants.
+        this.variants.insert("Ok".into(), ("Result".into(), 1));
+        this.variants.insert("Err".into(), ("Result".into(), 1));
+        this
+    }
+
+    fn name_of(&self, spur: Spur) -> String {
+        self.parsed.rodeo.resolve(&spur).to_owned()
+    }
+
+    fn tick(&mut self) -> Result<(), InterpError> {
+        self.steps += 1;
+        if self.steps > STEP_LIMIT {
+            return Err(InterpError::StepLimit);
+        }
+        Ok(())
+    }
+
+    fn call_main(&mut self) -> Result<Value, InterpError> {
+        let Some(&idx) = self.fns.get("main") else {
+            return Err(InterpError::NoMain);
+        };
+        self.call_fn(idx, &[])
+    }
+
+    // ----- functions ----------------------------------------------------------
+
+    fn call_fn(&mut self, item_idx: usize, args: &[Value]) -> Result<Value, InterpError> {
+        self.tick()?;
+        let Item::Function(f) = &self.parsed.items[item_idx] else {
+            return Err(InterpError::Unresolved(format!("item {item_idx}")));
+        };
+        let Some(body_id) = f.body else {
+            return Err(InterpError::Unsupported("bodiless fn"));
+        };
+        if args.len() != f.params.len() {
+            return Err(InterpError::Type(format!(
+                "arity mismatch: {} args for {} params",
+                args.len(),
+                f.params.len()
+            )));
+        }
+        self.scopes.push(HashMap::new());
+        for (p, a) in f.params.iter().zip(args.iter()) {
+            self.scopes
+                .last_mut()
+                .expect("scope")
+                .insert(p.name, a.clone());
+        }
+        let flow = match self.block(body_id) {
+            Ok(flow) => flow,
+            // `expr?`-on-`Err` / `return` inside an expr-block escapes here.
+            Err(InterpError::Escape(Escape::Return(v))) => Flow::Return(v),
+            Err(e) => {
+                self.scopes.pop();
+                return Err(e);
+            }
+        };
+        self.scopes.pop();
+        match flow {
+            Flow::Return(v) | Flow::Value(v) => Ok(v),
+            Flow::Break | Flow::Continue => {
+                Err(InterpError::Type("break/continue escaped function".into()))
+            }
+        }
+    }
+
+    // ----- blocks & statements ----------------------------------------------------
+
+    fn block(&mut self, id: aura_ast::BlockId) -> Result<Flow, InterpError> {
+        self.tick()?;
+        let Block { stmts, tail, .. } = self.parsed.ast.block(id).clone();
+        self.scopes.push(HashMap::new());
+        let mut out = Flow::Value(Value::Unit);
+        for sid in stmts {
+            match self.stmt(sid) {
+                Ok(Flow::Value(_)) => {}
+                Ok(other) => {
+                    out = other;
+                    break;
+                }
+                Err(InterpError::Escape(e)) => {
+                    out = e.into_flow();
+                    break;
+                }
+                Err(e) => {
+                    self.scopes.pop();
+                    return Err(e);
+                }
+            }
+        }
+        if matches!(out, Flow::Value(_))
+            && let Some(t) = tail
+        {
+            match self.expr(t) {
+                Ok(v) => out = Flow::Value(v),
+                Err(InterpError::Escape(e)) => out = e.into_flow(),
+                Err(e) => {
+                    self.scopes.pop();
+                    return Err(e);
+                }
+            }
+        }
+        self.scopes.pop();
+        Ok(out)
+    }
+
+    fn stmt(&mut self, id: StmtId) -> Result<Flow, InterpError> {
+        self.tick()?;
+        match self.parsed.ast.stmt(id).clone() {
+            Stmt::Let { name, init, .. } => {
+                let v = self.expr(init)?;
+                self.scopes.last_mut().expect("scope").insert(name, v);
+                Ok(Flow::Value(Value::Unit))
+            }
+            Stmt::Expr(e) => self.expr(e).map(Flow::Value),
+            Stmt::Return(e) => {
+                let v = match e {
+                    Some(e) => self.expr(e)?,
+                    None => Value::Unit,
+                };
+                Ok(Flow::Return(v))
+            }
+            Stmt::While { cond, body } => {
+                loop {
+                    self.tick()?;
+                    if !self.expr(cond)?.truthy()? {
+                        break;
+                    }
+                    match self.block(body)? {
+                        Flow::Value(_) | Flow::Continue => {}
+                        Flow::Break => break,
+                        Flow::Return(v) => return Ok(Flow::Return(v)),
+                    }
+                }
+                Ok(Flow::Value(Value::Unit))
+            }
+            Stmt::Loop { body } => {
+                loop {
+                    self.tick()?;
+                    match self.block(body)? {
+                        Flow::Value(_) | Flow::Continue => {}
+                        Flow::Break => break,
+                        Flow::Return(v) => return Ok(Flow::Return(v)),
+                    }
+                }
+                Ok(Flow::Value(Value::Unit))
+            }
+            Stmt::Break => Ok(Flow::Break),
+            Stmt::Continue => Ok(Flow::Continue),
+            Stmt::Error => Err(InterpError::Type("error statement".into())),
+        }
+    }
+
+    // ----- expressions -------------------------------------------------------------
+
+    fn expr(&mut self, id: ExprId) -> Result<Value, InterpError> {
+        self.tick()?;
+        match self.parsed.ast.expr(id).clone() {
+            Expr::Error => Err(InterpError::Type("error expr".into())),
+            Expr::Literal(l) => Ok(self.literal(&l)),
+            Expr::Ident(name) => self.lookup(name),
+            Expr::Binary { op, lhs, rhs } => self.binary(op, lhs, rhs),
+            Expr::Unary { op, operand } => {
+                let v = self.expr(operand)?;
+                Self::unary(op, &v)
+            }
+            Expr::Assign { target, value } => {
+                let v = self.expr(value)?;
+                let Expr::Ident(name) = self.parsed.ast.expr(target) else {
+                    return Err(InterpError::Unsupported("non-ident assignment"));
+                };
+                for scope in self.scopes.iter_mut().rev() {
+                    if scope.contains_key(name) {
+                        scope.insert(*name, v.clone());
+                        return Ok(v);
+                    }
+                }
+                Err(InterpError::Unresolved(self.name_of(*name)))
+            }
+            Expr::Call { callee, args } => self.call(callee, &args),
+            Expr::Field { object, field } => {
+                let obj = self.expr(object)?;
+                let fname = self.name_of(field);
+                match obj {
+                    Value::Struct { fields, name } => {
+                        let names = self
+                            .structs
+                            .get(&name)
+                            .ok_or_else(|| InterpError::Unresolved(name.clone()))?;
+                        let idx = names
+                            .iter()
+                            .position(|f| self.name_of(*f) == fname)
+                            .ok_or_else(|| InterpError::Unresolved(fname.clone()))?;
+                        fields
+                            .get(idx)
+                            .cloned()
+                            .ok_or(InterpError::Type("struct field index".into()))
+                    }
+                    v => Err(InterpError::Type(format!("field access on {v:?}"))),
+                }
+            }
+            Expr::If {
+                cond,
+                then_block,
+                else_branch,
+            } => {
+                if self.expr(cond)?.truthy()? {
+                    return self.block_value(then_block);
+                }
+                match else_branch {
+                    Some(e) => self.expr(e),
+                    None => Ok(Value::Unit),
+                }
+            }
+            Expr::Block(b) | Expr::Unsafe(b) => self.block_value(b),
+            Expr::Paren(inner) => self.expr(inner),
+            Expr::Match { scrutinee, arms } => self.match_expr(scrutinee, &arms),
+            Expr::StructLit { name, fields } => self.struct_lit(name, &fields),
+            Expr::Try { expr } => {
+                let v = self.expr(expr)?;
+                match v {
+                    Value::Variant {
+                        variant, fields, ..
+                    } if variant == "Ok" => Ok(fields.into_iter().next().unwrap_or(Value::Unit)),
+                    Value::Variant {
+                        variant, fields, ..
+                    } if variant == "Err" => {
+                        Err(InterpError::Escape(Escape::Return(Value::Variant {
+                            enum_name: "Result".into(),
+                            variant: "Err".into(),
+                            fields,
+                        })))
+                    }
+                    v => Err(InterpError::Type(format!("`?` on {v:?}"))),
+                }
+            }
+        }
+    }
+
+    /// Evaluate a block in expression position. `return`/`break`/`continue`
+    /// inside it do not become the block's value — they escape upward and are
+    /// re-caught by the enclosing statement-level `block()`.
+    fn block_value(&mut self, id: aura_ast::BlockId) -> Result<Value, InterpError> {
+        match self.block(id)? {
+            Flow::Value(v) => Ok(v),
+            Flow::Return(v) => Err(InterpError::Escape(Escape::Return(v))),
+            Flow::Break => Err(InterpError::Escape(Escape::Break)),
+            Flow::Continue => Err(InterpError::Escape(Escape::Continue)),
+        }
+    }
+
+    fn struct_lit(&mut self, name: Spur, fields: &[(Spur, ExprId)]) -> Result<Value, InterpError> {
+        let sname = self.name_of(name);
+        let defs = self
+            .structs
+            .get(&sname)
+            .cloned()
+            .ok_or_else(|| InterpError::Unresolved(sname.clone()))?;
+        let mut vals = Vec::with_capacity(fields.len());
+        for (fname, eid) in fields {
+            vals.push((self.name_of(*fname), self.expr(*eid)?));
+        }
+        // Reorder into declared field order.
+        let mut ordered = Vec::with_capacity(defs.len());
+        for d in &defs {
+            let v = vals
+                .iter()
+                .find(|(n, _)| n == &self.name_of(*d))
+                .map(|(_, v)| v.clone())
+                .ok_or_else(|| InterpError::Unresolved(self.name_of(*d)))?;
+            ordered.push(v);
+        }
+        Ok(Value::Struct {
+            name: sname,
+            fields: ordered,
+        })
+    }
+
+    // ----- operators ---------------------------------------------------------------
+
+    fn literal(&self, l: &Literal) -> Value {
+        match l {
+            Literal::Int(v) => Value::Int(i128::from(*v)),
+            Literal::Float(v) => Value::Float(*v),
+            Literal::Bool(v) => Value::Bool(*v),
+            Literal::Unit => Value::Unit,
+            Literal::Str(s) => Value::Str(self.name_of(*s)),
+        }
+    }
+
+    fn lookup(&self, name: Spur) -> Result<Value, InterpError> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(v) = scope.get(&name) {
+                return Ok(v.clone());
+            }
+        }
+        // Bare unit variants (`Empty`) evaluate to their variant value.
+        let n = self.name_of(name);
+        if let Some((en, 0)) = self.variants.get(&n) {
+            return Ok(Value::Variant {
+                enum_name: en.clone(),
+                variant: n,
+                fields: Vec::new(),
+            });
+        }
+        Err(InterpError::Unresolved(n))
+    }
+
+    fn binary(&mut self, op: BinOp, lhs: ExprId, rhs: ExprId) -> Result<Value, InterpError> {
+        // Short-circuit first — `rhs` may be invalid when lhs decides.
+        if op == BinOp::And {
+            let l = self.expr(lhs)?.truthy()?;
+            return Ok(Value::Bool(l && self.expr(rhs)?.truthy()?));
+        }
+        if op == BinOp::Or {
+            let l = self.expr(lhs)?.truthy()?;
+            return Ok(Value::Bool(l || self.expr(rhs)?.truthy()?));
+        }
+        let l = self.expr(lhs)?;
+        let r = self.expr(rhs)?;
+        match (op, &l, &r) {
+            (BinOp::Add, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_add(*b))),
+            (BinOp::Sub, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_sub(*b))),
+            (BinOp::Mul, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_mul(*b))),
+            (BinOp::Div | BinOp::Rem, Value::Int(_), Value::Int(0)) => Err(InterpError::DivByZero),
+            (BinOp::Div, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_div(*b))),
+            (BinOp::Rem, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_rem(*b))),
+            (BinOp::Add, Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
+            (BinOp::Sub, Value::Float(a), Value::Float(b)) => Ok(Value::Float(a - b)),
+            (BinOp::Mul, Value::Float(a), Value::Float(b)) => Ok(Value::Float(a * b)),
+            (BinOp::Div, Value::Float(a), Value::Float(b)) => Ok(Value::Float(a / b)),
+            (BinOp::Rem, Value::Float(a), Value::Float(b)) => Ok(Value::Float(a % b)),
+            (BinOp::Eq, a, b) => Ok(Value::Bool(a == b)),
+            (BinOp::Ne, a, b) => Ok(Value::Bool(a != b)),
+            (BinOp::Lt, Value::Int(a), Value::Int(b)) => Ok(Value::Bool(a < b)),
+            (BinOp::Le, Value::Int(a), Value::Int(b)) => Ok(Value::Bool(a <= b)),
+            (BinOp::Gt, Value::Int(a), Value::Int(b)) => Ok(Value::Bool(a > b)),
+            (BinOp::Ge, Value::Int(a), Value::Int(b)) => Ok(Value::Bool(a >= b)),
+            (BinOp::Lt, Value::Float(a), Value::Float(b)) => Ok(Value::Bool(a < b)),
+            (BinOp::Le, Value::Float(a), Value::Float(b)) => Ok(Value::Bool(a <= b)),
+            (BinOp::Gt, Value::Float(a), Value::Float(b)) => Ok(Value::Bool(a > b)),
+            (BinOp::Ge, Value::Float(a), Value::Float(b)) => Ok(Value::Bool(a >= b)),
+            _ => Err(InterpError::Type(format!(
+                "bad operands {l:?} {op:?} {r:?}"
+            ))),
+        }
+    }
+
+    fn unary(op: UnOp, v: &Value) -> Result<Value, InterpError> {
+        match (op, &v) {
+            (UnOp::Neg, Value::Int(a)) => Ok(Value::Int(a.wrapping_neg())),
+            (UnOp::Neg, Value::Float(a)) => Ok(Value::Float(-a)),
+            (UnOp::Not, Value::Bool(b)) => Ok(Value::Bool(!b)),
+            _ => Err(InterpError::Type(format!("bad unary {op:?} {v:?}"))),
+        }
+    }
+
+    // ----- calls & match ----------------------------------------------------------
+
+    fn call(&mut self, callee: ExprId, args: &[ExprId]) -> Result<Value, InterpError> {
+        let vals: Vec<Value> = args
+            .iter()
+            .map(|a| self.expr(*a))
+            .collect::<Result<_, _>>()?;
+        let Expr::Ident(name) = self.parsed.ast.expr(callee) else {
+            return Err(InterpError::Unsupported("indirect call"));
+        };
+        let cname = self.name_of(*name);
+
+        // Variant constructors (enums + Result's Ok/Err) take precedence —
+        // matching typeck, which resolves a bare `Name(..)` to a variant when
+        // a variant of that name exists.
+        if let Some((en, arity)) = self.variants.get(&cname).cloned()
+            && arity == vals.len()
+        {
+            return Ok(Value::Variant {
+                enum_name: en,
+                variant: cname,
+                fields: vals,
+            });
+        }
+        if self.builtins.contains(&cname) {
+            let b = Builtin::by_name(&cname).expect("registered builtin");
+            return b.call(&vals);
+        }
+        let Some(&idx) = self.fns.get(&cname) else {
+            return Err(InterpError::Unresolved(cname));
+        };
+        self.call_fn(idx, &vals)
+    }
+
+    fn match_expr(
+        &mut self,
+        scrutinee: ExprId,
+        arms: &[aura_ast::MatchArm],
+    ) -> Result<Value, InterpError> {
+        let scrut = self.expr(scrutinee)?;
+        for arm in arms {
+            self.scopes.push(HashMap::new());
+            if self.try_bind(&arm.pattern, &scrut)? {
+                let v = self.expr(arm.body);
+                self.scopes.pop();
+                return v;
+            }
+            self.scopes.pop();
+        }
+        Err(InterpError::Type("non-exhaustive match".into()))
+    }
+
+    /// Try to bind `pat` against `v`, pushing bindings into the top scope.
+    /// Returns whether the pattern matched.
+    fn try_bind(&mut self, pat: &Pattern, v: &Value) -> Result<bool, InterpError> {
+        match pat {
+            Pattern::Wildcard => Ok(true),
+            Pattern::Ident(name) => {
+                // An ident pattern that names a unit variant *tests* rather
+                // than binds (same resolution rule as typeck).
+                let n = self.name_of(*name);
+                if let Some((_, 0)) = self.variants.get(&n)
+                    && let Value::Variant { variant, .. } = v
+                {
+                    return Ok(*variant == n);
+                }
+                self.scopes
+                    .last_mut()
+                    .expect("scope")
+                    .insert(*name, v.clone());
+                Ok(true)
+            }
+            Pattern::Literal(l) => Ok(&self.literal(l) == v),
+            Pattern::Variant { name, args } => {
+                let pname = self.name_of(*name);
+                let Value::Variant {
+                    variant, fields, ..
+                } = v
+                else {
+                    return Ok(false);
+                };
+                if *variant != pname || fields.len() != args.len() {
+                    return Ok(false);
+                }
+                for (p, f) in args.iter().zip(fields.iter()) {
+                    if !self.try_bind(p, f)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+        }
+    }
+}
+
+impl Builtin {
+    fn by_name(name: &str) -> Option<Self> {
+        match name {
+            "sqrt" => Some(Self::Sqrt),
+            _ => None,
+        }
+    }
+
+    fn call(self, args: &[Value]) -> Result<Value, InterpError> {
+        match (self, args) {
+            (Self::Sqrt, [Value::Float(x)]) => Ok(Value::Float(x.sqrt())),
+            _ => Err(InterpError::Type("bad builtin args".into())),
+        }
+    }
+}

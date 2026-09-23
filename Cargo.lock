@@ -133,6 +133,7 @@ dependencies = [
  "aura-codegen",
  "aura-common",
  "aura-fmt",
+ "aura-interp",
  "aura-linker",
  "aura-lsp",
  "aura-mir",
@@ -191,6 +192,19 @@ dependencies = [
  "aura-semantic",
  "lasso",
  "salsa",
+]
+
+[[package]]
+name = "aura-interp"
+version = "0.1.0-alpha"
+dependencies = [
+ "aura-ast",
+ "aura-common",
+ "aura-lexer",
+ "aura-parser",
+ "aura-salsa-db",
+ "aura-semantic",
+ "lasso",
 ]
 
 [[package]]

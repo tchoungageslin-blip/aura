@@ -43,6 +43,8 @@ enum Command {
     },
     /// Compile, link, and run a file.
     Run { path: PathBuf },
+    /// Interpret `main` directly (no codegen) and forward its exit code.
+    Interp { path: PathBuf },
     /// Start the Language Server Protocol server over stdio.
     Lsp,
     /// Format a file canonically (in place unless --check/--stdout).
@@ -66,6 +68,7 @@ fn main() -> ExitCode {
         Command::Build { path, output } => build(&path, output.as_deref()),
         Command::Run { path } => run(&path),
         Command::Lsp => ExitCode::from(u8::try_from(aura_lsp::serve()).unwrap_or(1)),
+        Command::Interp { path } => interp(&path),
         Command::Fmt {
             path,
             check,
@@ -106,6 +109,27 @@ fn check(path: &Path) -> ExitCode {
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
+}
+
+fn interp(path: &Path) -> ExitCode {
+    let (db, file, cache) = match load(path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("error: cannot read {}: {e}", path.display());
+            return ExitCode::FAILURE;
+        }
+    };
+    let diags = check_file(&db, file);
+    if render(diags.as_slice(), &cache) {
+        return ExitCode::FAILURE;
+    }
+    match aura_interp::run_parsed(parsed(&db, file)) {
+        Ok(v) => ExitCode::from(u8::try_from(v).unwrap_or(1)),
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn parse(path: &Path) -> ExitCode {

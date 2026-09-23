@@ -20,6 +20,7 @@ aura-hir = { path = "crates/aura-hir" }
 aura-mir = { path = "crates/aura-mir" }
 aura-codegen = { path = "crates/aura-codegen" }
 aura-fmt = { path = "crates/aura-fmt" }
+aura-interp = { path = "crates/aura-interp" }
 aura-lsp = { path = "crates/aura-lsp" }
 aura-linker = { path = "crates/aura-linker" }
 

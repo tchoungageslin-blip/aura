@@ -1,0 +1,17 @@
+[package]
+name = "aura-interp"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+aura-common.workspace = true
+aura-lexer.workspace = true
+aura-ast.workspace = true
+aura-parser.workspace = true
+aura-salsa-db.workspace = true
+aura-semantic.workspace = true
+lasso.workspace = true
