@@ -20,7 +20,6 @@ aura-hir = { path = "crates/aura-hir" }
 aura-mir = { path = "crates/aura-mir" }
 aura-codegen = { path = "crates/aura-codegen" }
 aura-linker = { path = "crates/aura-linker" }
-aura-runtime = { path = "crates/aura-runtime" }
 
 # External crates — versions resolved at build time, pinned via Cargo.lock
 lasso = "0.7.3"
@@ -41,6 +40,7 @@ cranelift-frontend = "0.136"
 cranelift-module = "0.136"
 cranelift-object = "0.136"
 cranelift-native = "0.136"
+object = "0.37"
 proptest = "1"
 
 [workspace.lints.rust]

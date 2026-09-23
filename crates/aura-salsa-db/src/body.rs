@@ -23,7 +23,7 @@ use crate::{Db, SourceFile, parsed};
 
 /// One function's body, cloned into its own arena. `None` for items without
 /// bodies (extern fns, structs, …).
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Body {
     /// Arena containing only this body's nodes. Ids are remapped — they do
     /// NOT index into `parsed(..).ast`.

@@ -1,0 +1,253 @@
+//! aura-runtime — freestanding runtime linked into every Aura binary.
+//!
+//! `#![no_std]` + raw-dylib imports keep the runtime fully self-contained:
+//! `lld-link` can produce a working `.exe` from `hello.obj +
+//! aura_runtime.lib` with `/nodefaultlib` — no Windows SDK or CRT import
+//! libraries required.
+//!
+//! Exports:
+//! - `mainCRTStartup` — PE entry point (console subsystem): calls the
+//!   user program's `main` and forwards its return code to `ExitProcess`.
+//! - `aura_rt_alloc`/`aura_rt_free` — process-heap allocation for future
+//!   ARC-managed objects.
+//! - `aura_rt_retain`/`aura_rt_release` — ARC refcount ops (header layout:
+//!   `[refcount: u64][payload..]`, `retain`/`release` adjust the count,
+//!   `release` frees on zero).
+//!
+//! `unsafe_code` is allowed here — the FFI boundary is this crate's whole
+//! reason to exist. Workspace lint denial still applies everywhere else.
+
+#![no_std]
+#![allow(unsafe_code)]
+
+use core::ffi::c_void;
+use core::panic::PanicInfo;
+use core::sync::atomic::{AtomicU64, Ordering};
+
+// `main` as defined by the compiled Aura program (`fn main() -> i64`).
+// Any `fn main` returning an integer ABI-conforms: the low 32 bits of
+// the return value become the process exit code.
+#[cfg(target_os = "windows")]
+unsafe extern "C" {
+    fn main() -> i64;
+}
+
+#[cfg(target_os = "windows")]
+#[link(name = "kernel32", kind = "raw-dylib")]
+unsafe extern "C" {
+    fn ExitProcess(code: u32) -> !;
+    fn GetProcessHeap() -> *mut c_void;
+    fn HeapAlloc(heap: *mut c_void, flags: u32, bytes: usize) -> *mut c_void;
+    fn HeapFree(heap: *mut c_void, flags: u32, ptr: *mut c_void) -> i32;
+}
+
+/// PE console entry point. The loader starts here; we delegate to the
+/// Aura `main` and terminate with its exit code.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub extern "C" fn mainCRTStartup() -> ! {
+    unsafe { ExitProcess(u32::try_from(main()).unwrap_or(u32::MAX)) }
+}
+
+/// `panic = "abort"` strategy needs no personality routine — a panic
+/// straight to `ExitProcess` with the conventional abort code.
+#[panic_handler]
+fn panic(_info: &PanicInfo) -> ! {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        ExitProcess(101)
+    }
+    #[cfg(not(target_os = "windows"))]
+    loop {}
+}
+
+// Some objects emit an `INCLUDE _fltused` directive when floats are used;
+// with `/nodefaultlib` no CRT provides it, so we do.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub static _fltused: u32 = 0x9875;
+
+// ----- libc surface ---------------------------------------------------------------
+//
+// `core`'s precompiled objects reference the C memory intrinsics and the
+// SEH personality (`__CxxFrameHandler3` in `.xdata`). On MSVC targets
+// compiler-builtins deliberately omits them — the CRT normally supplies
+// them. `/nodefaultlib` links find them here instead.
+
+/// C `memcpy` — forward byte copy.
+///
+/// # Safety
+/// Regions must not overlap and `n` bytes must be valid at both ends.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn memcpy(
+    dst: *mut c_void,
+    src: *const c_void,
+    n: usize,
+) -> *mut c_void {
+    unsafe {
+        let (d, s) = (dst.cast::<u8>(), src.cast::<u8>());
+        let mut i = 0;
+        while i < n {
+            *d.add(i) = *s.add(i);
+            i += 1;
+        }
+    }
+    dst
+}
+
+/// C `memmove` — overlap-safe copy via direction selection.
+///
+/// # Safety
+/// `n` bytes must be valid at both `dst` and `src`.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn memmove(
+    dst: *mut c_void,
+    src: *const c_void,
+    n: usize,
+) -> *mut c_void {
+    unsafe {
+        let (d, s) = (dst.cast::<u8>(), src.cast::<u8>());
+        if (d as usize) <= (s as usize) {
+            let mut i = 0;
+            while i < n {
+                *d.add(i) = *s.add(i);
+                i += 1;
+            }
+        } else {
+            let mut i = n;
+            while i > 0 {
+                i -= 1;
+                *d.add(i) = *s.add(i);
+            }
+        }
+    }
+    dst
+}
+
+/// C `memset` — fill `n` bytes with `v`.
+///
+/// # Safety
+/// `dst` must be valid for `n` bytes.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn memset(dst: *mut c_void, v: i32, n: usize) -> *mut c_void {
+    unsafe {
+        let d = dst.cast::<u8>();
+        let b = v as u8;
+        let mut i = 0;
+        while i < n {
+            *d.add(i) = b;
+            i += 1;
+        }
+    }
+    dst
+}
+
+/// C `memcmp` — lexicographic byte compare.
+///
+/// # Safety
+/// Both pointers must be valid for `n` bytes.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn memcmp(a: *const c_void, b: *const c_void, n: usize) -> i32 {
+    unsafe {
+        let (x, y) = (a.cast::<u8>(), b.cast::<u8>());
+        let mut i = 0;
+        while i < n {
+            let (u, v) = (*x.add(i), *y.add(i));
+            if u != v {
+                return i32::from(u) - i32::from(v);
+            }
+            i += 1;
+        }
+    }
+    0
+}
+
+/// SEH personality referenced by `core`'s unwind tables. Unreachable —
+/// the runtime is compiled `panic = "abort"`, so no Rust frame ever
+/// unwinds. If a foreign unwind ever walks here, abort the process.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub extern "C" fn __CxxFrameHandler3() -> ! {
+    unsafe { ExitProcess(0xC000_0409) } // STACK_BUFFER_OVERRUN / fast-fail
+}
+
+// ----- C-math surface -------------------------------------------------------------
+//
+// `/nodefaultlib` means no msvcrt — extern "C" math functions Aura code
+// declares resolve here instead. Implemented on hardware instructions;
+// soft-fp fallbacks land with the other targets.
+
+/// `sqrt` for `extern "C" { fn sqrt(f64) -> f64 }`.
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn sqrt(x: f64) -> f64 {
+    use core::arch::x86_64::{_mm_cvtsd_f64, _mm_set_sd, _mm_sqrt_sd};
+    // SAFETY: SSE2 is baseline on x86_64; the intrinsics are pure.
+    unsafe { _mm_cvtsd_f64(_mm_sqrt_sd(_mm_set_sd(x), _mm_set_sd(x))) }
+}
+
+// ----- heap -------------------------------------------------------------------
+
+/// Allocate `bytes` from the process heap. Returns null on failure
+/// (callers are generated code; the compiler inserts OOM handling).
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub extern "C" fn aura_rt_alloc(bytes: usize) -> *mut u8 {
+    unsafe { HeapAlloc(GetProcessHeap(), 0, bytes).cast() }
+}
+
+/// Free a pointer from `aura_rt_alloc`. Null is a no-op.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_rt_free(ptr: *mut u8) {
+    if !ptr.is_null() {
+        unsafe {
+            HeapFree(GetProcessHeap(), 0, ptr.cast());
+        }
+    }
+}
+
+// ----- ARC ----------------------------------------------------------------------
+//
+// Managed object header: `[refcount: AtomicU64][payload …]`.
+// `aura_rt_retain` increments, `aura_rt_release` decrements and frees at
+// zero. Week-1 scope: strong refs only — the cycle detector lands later.
+
+/// Bump the refcount of an ARC-managed pointer (payload address).
+///
+/// # Safety
+/// `ptr` must be a live pointer returned by the ARC allocator, or null.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_rt_retain(ptr: *mut u8) {
+    if ptr.is_null() {
+        return;
+    }
+    unsafe {
+        let rc = ptr.cast::<AtomicU64>().sub(1);
+        (*rc).fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// Drop one ref; frees the allocation (header included) at zero.
+///
+/// # Safety
+/// `ptr` must be a live pointer returned by the ARC allocator, or null.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_rt_release(ptr: *mut u8) {
+    if ptr.is_null() {
+        return;
+    }
+    unsafe {
+        let rc = ptr.cast::<AtomicU64>().sub(1);
+        if (*rc).fetch_sub(1, Ordering::Release) == 1 {
+            core::sync::atomic::fence(Ordering::Acquire);
+            aura_rt_free(rc.cast());
+        }
+    }
+}

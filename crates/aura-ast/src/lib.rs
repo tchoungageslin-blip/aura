@@ -54,7 +54,7 @@ pub struct Spanned<T> {
 }
 
 /// Vec-indexed arena. The id type is chosen by inference at the call site.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Arena<T> {
     nodes: Vec<Spanned<T>>,
 }
@@ -97,7 +97,7 @@ impl<T: PartialEq> PartialEq for Arena<T> {
 }
 
 /// All arenas of one parsed file, bundled so functions can pass `&Ast`.
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct Ast {
     pub exprs: Arena<Expr>,
     pub stmts: Arena<Stmt>,

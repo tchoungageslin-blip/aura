@@ -55,4 +55,6 @@ pub mod codes {
     pub const CG_INTERNAL: &str = "E3001";
     pub const CG_LINK_FAILED: &str = "E3002";
     pub const CG_LINKER_NOT_FOUND: &str = "E3003";
+    pub const CG_UNSUPPORTED: &str = "E3004";
+    pub const CG_MAIN_TYPE: &str = "E3005";
 }

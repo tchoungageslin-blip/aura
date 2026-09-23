@@ -8,6 +8,18 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+aura-ast.workspace = true
 aura-common.workspace = true
 aura-mir.workspace = true
+aura-salsa-db.workspace = true
 aura-semantic.workspace = true
+rustc-hash.workspace = true
+cranelift-codegen.workspace = true
+cranelift-frontend.workspace = true
+cranelift-module.workspace = true
+cranelift-native.workspace = true
+cranelift-object.workspace = true
+salsa.workspace = true
+
+[dev-dependencies]
+object.workspace = true

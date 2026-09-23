@@ -1,4 +1,131 @@
-//! aura-codegen — Aura compiler crate.
+//! aura-codegen — object-file emission via Cranelift.
 //!
-//! Implementation lands in the phase assigned by docs/megaplan.md.
-//! This stub exists so the workspace compiles from Phase 0 onward.
+//! [`compile_file`] drives the backend pipeline for one source file:
+//! collect each function's MIR (diagnostics included), validate the
+//! entry point, then emit a single COFF/ELF object through
+//! `cranelift-object`.
+//!
+//! The output is a relocatable object — final linking is `aura-linker`'s
+//! job (`aura build`/`aura run`).
+
+mod emit;
+mod layout;
+
+pub use emit::Emitted;
+pub use layout::{Layout, scalar_size_align, struct_layout};
+
+use aura_common::{Diagnostic, Span, codes};
+use aura_mir::mir_fn;
+use aura_salsa_db::{Db, FileItems, ItemSig, SourceFile, file_items};
+use aura_semantic::{IntTy, Type, lower_typename};
+
+/// Result of compiling one file.
+pub struct CompileOutput {
+    /// Object bytes — `None` if diagnostics contain errors.
+    pub object: Option<Vec<u8>>,
+    /// MIR-level and codegen diagnostics.
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Compile `file` to an object file. Expects `check_file` to have passed;
+/// unsupported constructs surface as `E3004` diagnostics here (and abort
+/// the object).
+pub fn compile_file(db: &dyn Db, file: SourceFile) -> CompileOutput {
+    let items = file_items(db, file);
+    let file_id = file.file_id(db);
+    let mut diagnostics = Vec::new();
+    let mut mirs = Vec::new();
+
+    for (i, sig) in items.iter() {
+        if !matches!(sig, ItemSig::Fn { .. }) {
+            continue;
+        }
+        let Some(mir) = mir_fn(db, file, i).as_ref() else {
+            continue;
+        };
+        diagnostics.extend(mir.diagnostics.iter().cloned());
+        mirs.push((i, mir.clone()));
+    }
+
+    // Reject types with no codegen representation yet (128-bit ints,
+    // str/enum/tuple — most are already diagnosed in MIR).
+    for (_, mir) in &mirs {
+        for l in &mir.locals {
+            if unsupported_ty(&l.ty, items) {
+                diagnostics.push(Diagnostic::error(
+                    codes::CG_UNSUPPORTED,
+                    format!(
+                        "codegen: type `{}` is not yet supported",
+                        l.ty.display(items)
+                    ),
+                    Span::point(file_id, 0),
+                ));
+            }
+        }
+    }
+
+    // Entry-point validation.
+    match items.find("main") {
+        None => diagnostics.push(Diagnostic::error(
+            codes::CG_MAIN_TYPE,
+            "no `main` function".to_owned(),
+            Span::point(file_id, 0),
+        )),
+        Some(idx) => {
+            if let Some(ItemSig::Fn { params, ret, .. }) = items.items.get(idx as usize) {
+                let ok_ret = ret
+                    .as_ref()
+                    .is_none_or(|t| matches!(lower_typename(items, t), Type::Int(_) | Type::Unit));
+                if !params.is_empty() || !ok_ret {
+                    diagnostics.push(Diagnostic::error(
+                        codes::CG_MAIN_TYPE,
+                        "`main` must take no parameters and return an integer".to_owned(),
+                        Span::point(file_id, 0),
+                    ));
+                }
+            }
+        }
+    }
+
+    if diagnostics.iter().any(aura_common::Diagnostic::is_error) {
+        return CompileOutput {
+            object: None,
+            diagnostics,
+        };
+    }
+
+    match emit::emit_object(items, &mirs) {
+        Ok(e) => CompileOutput {
+            object: Some(e.object),
+            diagnostics,
+        },
+        Err(ds) => {
+            diagnostics.extend(ds);
+            CompileOutput {
+                object: None,
+                diagnostics,
+            }
+        }
+    }
+}
+
+fn unsupported_ty(t: &Type, items: &FileItems) -> bool {
+    match t {
+        Type::Int(IntTy::I128 | IntTy::U128)
+        | Type::Str
+        | Type::Enum(_)
+        | Type::Tuple(_)
+        | Type::Fn { .. } => true,
+        Type::Pointer { pointee, .. } => unsupported_ty(pointee, items),
+        // A struct is supported iff a C-compatible layout exists for it
+        // (all fields representable).
+        Type::Struct(i) => struct_layout(items, *i, 8).is_none(),
+        Type::Int(_)
+        | Type::Float(_)
+        | Type::Bool
+        | Type::Unit
+        | Type::Never
+        | Type::Error
+        | Type::Var(_) => false,
+    }
+}

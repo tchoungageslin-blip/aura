@@ -10,5 +10,7 @@ workspace = true
 [dependencies]
 aura-ast.workspace = true
 aura-common.workspace = true
+aura-salsa-db.workspace = true
 aura-semantic.workspace = true
 lasso.workspace = true
+salsa.workspace = true

@@ -8,8 +8,12 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+aura-ast.workspace = true
 aura-common.workspace = true
 aura-hir.workspace = true
+aura-salsa-db.workspace = true
 aura-semantic.workspace = true
 indexmap.workspace = true
+lasso.workspace = true
 rustc-hash.workspace = true
+salsa.workspace = true

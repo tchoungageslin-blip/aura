@@ -25,6 +25,27 @@ pub enum IntTy {
 }
 
 impl IntTy {
+    /// Width in bytes on the 64-bit targets Aura supports.
+    /// (`isize`/`usize` are pointer-sized.)
+    pub fn bytes(self) -> u32 {
+        match self {
+            IntTy::I8 | IntTy::U8 => 1,
+            IntTy::I16 | IntTy::U16 => 2,
+            IntTy::I32 | IntTy::U32 => 4,
+            IntTy::I64 | IntTy::U64 | IntTy::Isize | IntTy::Usize => 8,
+            IntTy::I128 | IntTy::U128 => 16,
+        }
+    }
+
+    /// Whether the type is signed (`usize`/`isize` follow their
+    /// fixed-width siblings).
+    pub fn is_signed(self) -> bool {
+        !matches!(
+            self,
+            IntTy::U8 | IntTy::U16 | IntTy::U32 | IntTy::U64 | IntTy::U128 | IntTy::Usize
+        )
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             IntTy::I8 => "i8",
