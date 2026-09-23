@@ -1,0 +1,10 @@
+fn main() -> i64 {
+    println("Hello, World!")
+    eprintln("warn")
+    if exit_code() == 3 { exit(3) }
+    0
+}
+
+fn exit_code() -> i64 {
+    3
+}

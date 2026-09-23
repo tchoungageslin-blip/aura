@@ -13,6 +13,10 @@
 //! - `aura_rt_retain`/`aura_rt_release` — ARC refcount ops (header layout:
 //!   `[refcount: u64][payload..]`, `retain`/`release` adjust the count,
 //!   `release` frees on zero).
+//! - `aura_rt_print`/`aura_rt_println`/`aura_rt_eprint`/`aura_rt_eprintln` —
+//!   stdout/stderr writes behind the `print`-family prelude builtins.
+//! - `aura_rt_exit` — `ExitProcess` behind the `exit` builtin.
+//! - `aura_str_eq` — byte equality behind `str ==`/`!=`.
 //!
 //! `unsafe_code` is allowed here — the FFI boundary is this crate's whole
 //! reason to exist. Workspace lint denial still applies everywhere else.
@@ -39,6 +43,14 @@ unsafe extern "C" {
     fn GetProcessHeap() -> *mut c_void;
     fn HeapAlloc(heap: *mut c_void, flags: u32, bytes: usize) -> *mut c_void;
     fn HeapFree(heap: *mut c_void, flags: u32, ptr: *mut c_void) -> i32;
+    fn GetStdHandle(which: i32) -> *mut c_void;
+    fn WriteFile(
+        handle: *mut c_void,
+        buf: *const c_void,
+        len: u32,
+        written: *mut u32,
+        overlapped: *mut c_void,
+    ) -> i32;
 }
 
 /// PE console entry point. The loader starts here; we delegate to the
@@ -250,6 +262,106 @@ pub unsafe extern "C" fn aura_rt_release(ptr: *mut u8) {
             aura_rt_free(rc.cast());
         }
     }
+}
+
+// ----- io -----------------------------------------------------------------------
+//
+// `aura_rt_print`-family — the codegen target of the `print`/`eprint`
+// prelude builtins. `str` arguments arrive already flattened to
+// `{ptr, len}` by the caller, so these stay scalar-only C ABI.
+
+#[cfg(target_os = "windows")]
+const STD_OUTPUT_HANDLE: i32 = -11;
+#[cfg(target_os = "windows")]
+const STD_ERROR_HANDLE: i32 = -12;
+
+/// Write `len` bytes at `ptr` to `which` std handle; failures are
+/// swallowed (console closed, redirected to a dead pipe — nothing a
+/// freestanding runtime can report to anyway).
+///
+/// # Safety
+/// `ptr` must be valid for `len` bytes (or null when `len == 0`).
+#[cfg(target_os = "windows")]
+unsafe fn write_all(which: i32, ptr: *const u8, len: usize) {
+    if len == 0 || ptr.is_null() {
+        return;
+    }
+    let handle = unsafe { GetStdHandle(which) };
+    if handle.is_null() || handle as usize == usize::MAX {
+        return; // no console — detached process (INVALID_HANDLE_VALUE)
+    }
+    // WriteFile caps `len` at u32 — chunk oversized writes.
+    let mut off = 0usize;
+    while off < len {
+        let chunk = u32::try_from(len - off).unwrap_or(u32::MAX);
+        let mut written = 0u32;
+        unsafe {
+            WriteFile(
+                handle,
+                ptr.add(off).cast(),
+                chunk,
+                &mut written,
+                core::ptr::null_mut(),
+            );
+        }
+        if written == 0 {
+            break;
+        }
+        off += written as usize;
+    }
+}
+
+/// `aura_rt_print(ptr, len)` — backend of `print(s: str)`.
+///
+/// # Safety
+/// `ptr` must be valid for `len` bytes.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_rt_print(ptr: *const u8, len: usize) {
+    unsafe { write_all(STD_OUTPUT_HANDLE, ptr, len) }
+}
+
+/// `aura_rt_println(ptr, len)` — backend of `println(s: str)`.
+///
+/// # Safety
+/// `ptr` must be valid for `len` bytes.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_rt_println(ptr: *const u8, len: usize) {
+    unsafe {
+        write_all(STD_OUTPUT_HANDLE, ptr, len);
+        write_all(STD_OUTPUT_HANDLE, b"\n".as_ptr(), 1);
+    }
+}
+
+/// `aura_rt_eprint(ptr, len)` — backend of `eprint(s: str)`.
+///
+/// # Safety
+/// `ptr` must be valid for `len` bytes.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_rt_eprint(ptr: *const u8, len: usize) {
+    unsafe { write_all(STD_ERROR_HANDLE, ptr, len) }
+}
+
+/// `aura_rt_eprintln(ptr, len)` — backend of `eprintln(s: str)`.
+///
+/// # Safety
+/// `ptr` must be valid for `len` bytes.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_rt_eprintln(ptr: *const u8, len: usize) {
+    unsafe {
+        write_all(STD_ERROR_HANDLE, ptr, len);
+        write_all(STD_ERROR_HANDLE, b"\n".as_ptr(), 1);
+    }
+}
+
+/// `aura_rt_exit(code)` — backend of `exit(code)`. Never returns.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub extern "C" fn aura_rt_exit(code: i64) -> ! {
+    unsafe { ExitProcess(u32::try_from(code).unwrap_or(u32::MAX)) }
 }
 
 // ----- str ----------------------------------------------------------------------

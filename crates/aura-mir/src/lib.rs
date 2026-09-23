@@ -19,7 +19,7 @@ pub use dump::dump;
 pub use lower::{mir_fn, mir_project_fn};
 
 use aura_ast::{BinOp, UnOp};
-use aura_common::Diagnostic;
+use aura_common::{BuiltinFn, Diagnostic};
 use aura_semantic::{FloatTy, IntTy, Type};
 
 /// Basic-block id — index into [`MirBody::blocks`].
@@ -184,4 +184,6 @@ pub enum Callee {
     Fn(u32),
     /// `extern` fn — `(extern-block item index, fn index inside it)`.
     Extern(u32, u32),
+    /// Prelude builtin — lowered to a runtime import (`aura_rt_*`).
+    Builtin(BuiltinFn),
 }

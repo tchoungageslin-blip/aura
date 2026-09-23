@@ -12,7 +12,7 @@
 //!   x64-windows, `SystemV` elsewhere) for both internal and extern fns.
 
 use aura_ast::{BinOp, UnOp};
-use aura_common::{Diagnostic, Span, codes};
+use aura_common::{BuiltinFn, Diagnostic, Span, codes};
 use aura_mir::{Callee, Const, MirBody, MirStmt, MirTerm, Operand, Place, Rvalue};
 use aura_salsa_db::{FileItems, ItemSig};
 use aura_semantic::{FloatTy, Type};
@@ -45,6 +45,9 @@ struct FnTable {
     externs: FxHashMap<(u32, u32), FuncId>,
     /// Runtime `aura_str_eq` helper — imported unconditionally.
     str_eq: FuncId,
+    /// Runtime helpers for prelude builtins (`aura_rt_print`, …) —
+    /// imported unconditionally; unreferenced imports are dropped.
+    builtins: FxHashMap<BuiltinFn, FuncId>,
 }
 
 /// Compile every function body into one object module and emit bytes.
@@ -72,10 +75,12 @@ pub fn emit_object(items: &FileItems, mirs: &[(u32, MirBody)]) -> Result<Emitted
 
     // Pass 1 — declare every callable symbol before bodies reference them.
     let str_eq = declare_str_eq(&mut module, ptr, call_conv)?;
+    let builtins = declare_builtins(&mut module, ptr, call_conv)?;
     let mut table = FnTable {
         fns: FxHashMap::default(),
         externs: FxHashMap::default(),
         str_eq,
+        builtins,
     };
     for (i, sig) in items.iter() {
         match sig {
@@ -182,6 +187,30 @@ fn declare_str_eq(
     module
         .declare_function("aura_str_eq", Linkage::Import, &sig)
         .map_err(|e| internal(&format!("declare aura_str_eq: {e}")))
+}
+
+/// Import every `aura_rt_*` builtin helper — `print`-family takes
+/// `{ptr, len}`, `exit` takes `i64`; all return void. Declared
+/// unconditionally; unreferenced imports are dropped.
+fn declare_builtins(
+    module: &mut ObjectModule,
+    ptr: cranelift_codegen::ir::Type,
+    cc: cranelift_codegen::isa::CallConv,
+) -> Result<FxHashMap<BuiltinFn, FuncId>, Vec<Diagnostic>> {
+    let mut out = FxHashMap::default();
+    for &b in BuiltinFn::ALL {
+        let mut sig = Signature::new(cc);
+        if b.takes_str() {
+            sig.params.extend([AbiParam::new(ptr); 2]); // str → {ptr, len}
+        } else {
+            sig.params.push(AbiParam::new(types::I64)); // exit code
+        }
+        let id = module
+            .declare_function(b.runtime_symbol(), Linkage::Import, &sig)
+            .map_err(|e| internal(&format!("declare {}: {e}", b.runtime_symbol())))?;
+        out.insert(b, id);
+    }
+    Ok(out)
 }
 
 // ----- signatures --------------------------------------------------------------
@@ -561,9 +590,14 @@ impl FnGen<'_, '_> {
     }
 
     fn call(&mut self, dest: &Place, callee: Callee, args: &[Operand]) {
+        if let Callee::Builtin(b) = callee {
+            self.call_builtin(b, args);
+            return;
+        }
         let fid = match callee {
             Callee::Fn(i) => self.table.fns.get(&i).copied(),
             Callee::Extern(b, f) => self.table.externs.get(&(b, f)).copied(),
+            Callee::Builtin(_) => unreachable!(),
         };
         let Some(fid) = fid else { return };
         let fref = self.module.declare_func_in_func(fid, self.b.func);
@@ -592,6 +626,34 @@ impl FnGen<'_, '_> {
         }
     }
 
+    /// Prelude builtin call — `print`-family takes a `str` operand and
+    /// flattens it to `{ptr, len}`; `exit` takes its `i64` code. All are
+    /// `void` at the ABI level (`exit` never returns anyway).
+    fn call_builtin(&mut self, b: BuiltinFn, args: &[Operand]) {
+        let Some(&fid) = self.table.builtins.get(&b) else {
+            return;
+        };
+        let fref = self.module.declare_func_in_func(fid, self.b.func);
+        let argvals: Vec<Value> = if b.takes_str() {
+            let Some(op) = args.first() else { return };
+            let base = self.operand_addr(op);
+            let len_off = i32::try_from(self.ptr.bytes()).unwrap_or(i32::MAX);
+            let lp = self
+                .b
+                .ins()
+                .load(self.ptr, MemFlagsData::trusted(), base, 0);
+            let ll = self
+                .b
+                .ins()
+                .load(self.ptr, MemFlagsData::trusted(), base, len_off);
+            vec![lp, ll]
+        } else {
+            let Some(op) = args.first() else { return };
+            vec![self.operand_val(op)]
+        };
+        self.b.ins().call(fref, &argvals);
+    }
+
     /// Declared type of the `ai`-th *clif* parameter of `callee` (accounting
     /// for the hidden sret param).
     fn operand_param_ty(&self, callee: Callee, ai: usize) -> Option<Type> {
@@ -608,6 +670,7 @@ impl FnGen<'_, '_> {
                     }
                     _ => return None,
                 },
+                Callee::Builtin(_) => return None, // handled by `call_builtin`
             };
         let ret_agg = ret.is_some_and(|t| is_aggregate(&lower_ty(self.items, t)));
         let idx = if ret_agg { ai.checked_sub(1)? } else { ai };

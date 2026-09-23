@@ -163,11 +163,14 @@ pub fn run_project(
 
 fn run_files(files: &[&aura_parser::ParsedFile]) -> Result<i64, InterpError> {
     let mut interp = Interp::new(files);
-    match interp.call_main()? {
-        Value::Int(v) => {
+    match interp.call_main() {
+        Ok(Value::Int(v)) => {
             i64::try_from(v).map_err(|_| InterpError::Type("main result out of i64 range".into()))
         }
-        v => Err(InterpError::Type(format!("main returned {v:?}"))),
+        Ok(v) => Err(InterpError::Type(format!("main returned {v:?}"))),
+        // `exit(code)` anywhere in the program ends it here.
+        Err(InterpError::Escape(Escape::Exit(code))) => Ok(code),
+        Err(e) => Err(e),
     }
 }
 
@@ -188,6 +191,9 @@ pub enum Escape {
     Return(Value),
     Break,
     Continue,
+    /// `exit(code)` — terminates the *program*, not just the call frame;
+    /// propagates as `Err` past every block/loop boundary.
+    Exit(i64),
 }
 
 impl Escape {
@@ -196,14 +202,21 @@ impl Escape {
             Escape::Return(v) => Flow::Return(v),
             Escape::Break => Flow::Break,
             Escape::Continue => Flow::Continue,
+            Escape::Exit(_) => unreachable!("Exit propagates as Err, never converts to Flow"),
         }
     }
 }
 
-/// Extern functions the interpreter can execute without FFI.
+/// Extern functions the interpreter can execute without FFI — user
+/// `extern` declarations plus the runtime-backed prelude builtins.
 #[derive(Debug, Clone, Copy)]
 enum Builtin {
     Sqrt,
+    Print,
+    Println,
+    Eprint,
+    Eprintln,
+    Exit,
 }
 
 /// The interpreter: item tables plus a scope stack and fuel.
@@ -380,7 +393,7 @@ impl<'a> Interp<'a> {
                     out = other;
                     break;
                 }
-                Err(InterpError::Escape(e)) => {
+                Err(InterpError::Escape(e)) if !matches!(e, Escape::Exit(_)) => {
                     out = e.into_flow();
                     break;
                 }
@@ -395,7 +408,9 @@ impl<'a> Interp<'a> {
         {
             match self.expr(t) {
                 Ok(v) => out = Flow::Value(v),
-                Err(InterpError::Escape(e)) => out = e.into_flow(),
+                Err(InterpError::Escape(e)) if !matches!(e, Escape::Exit(_)) => {
+                    out = e.into_flow();
+                }
                 Err(e) => {
                     self.scopes.pop();
                     return Err(e);
@@ -695,6 +710,11 @@ impl<'a> Interp<'a> {
             return b.call(&vals);
         }
         let Some(&(fi, idx)) = self.fns.get(&cname) else {
+            // Prelude builtins — reached only when no user fn/variant
+            // claimed the name above, so user definitions shadow them.
+            if let Some(b) = Builtin::by_name(&cname) {
+                return b.call(&vals);
+            }
             return Err(InterpError::Unresolved(cname));
         };
         self.call_fn(fi, idx, &vals)
@@ -765,13 +785,50 @@ impl Builtin {
     fn by_name(name: &str) -> Option<Self> {
         match name {
             "sqrt" => Some(Self::Sqrt),
+            "print" => Some(Self::Print),
+            "println" => Some(Self::Println),
+            "eprint" => Some(Self::Eprint),
+            "eprintln" => Some(Self::Eprintln),
+            "exit" => Some(Self::Exit),
             _ => None,
         }
     }
 
     fn call(self, args: &[Value]) -> Result<Value, InterpError> {
+        use std::io::Write;
+        let write = |stderr: bool, s: &str, nl: bool| {
+            let out: &mut dyn Write = if stderr {
+                &mut std::io::stderr()
+            } else {
+                &mut std::io::stdout()
+            };
+            let _ = out.write_all(s.as_bytes());
+            if nl {
+                let _ = out.write_all(b"\n");
+            }
+            let _ = out.flush();
+        };
         match (self, args) {
             (Self::Sqrt, [Value::Float(x)]) => Ok(Value::Float(x.sqrt())),
+            (Self::Print, [Value::Str(s)]) => {
+                write(false, s, false);
+                Ok(Value::Unit)
+            }
+            (Self::Println, [Value::Str(s)]) => {
+                write(false, s, true);
+                Ok(Value::Unit)
+            }
+            (Self::Eprint, [Value::Str(s)]) => {
+                write(true, s, false);
+                Ok(Value::Unit)
+            }
+            (Self::Eprintln, [Value::Str(s)]) => {
+                write(true, s, true);
+                Ok(Value::Unit)
+            }
+            (Self::Exit, [Value::Int(c)]) => Err(InterpError::Escape(Escape::Exit(
+                i64::try_from(*c).unwrap_or(i64::MAX),
+            ))),
             _ => Err(InterpError::Type("bad builtin args".into())),
         }
     }

@@ -414,3 +414,22 @@ fn match_on_result_binds_payloads() {
         .count();
     assert_eq!(discs, 2, "expected Ok+Err tests: {:?}", dump(&m));
 }
+
+#[test]
+fn builtin_call_lowers_to_builtin_callee() {
+    let m = mir_of("fn f() { println(\"x\") }", "f");
+    assert!(m.diagnostics.is_empty(), "{:?}", m.diagnostics);
+    let builtin = m.blocks.iter().flat_map(|b| &b.stmts).any(|s| {
+        matches!(
+            s,
+            aura_mir::MirStmt::Assign(
+                _,
+                aura_mir::Rvalue::Call(
+                    aura_mir::Callee::Builtin(aura_common::BuiltinFn::Println),
+                    _
+                )
+            )
+        )
+    });
+    assert!(builtin, "expected builtin callee in {:?}", dump(&m));
+}

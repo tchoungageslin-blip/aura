@@ -215,3 +215,18 @@ fn str_ptr_is_opaque_int() {
         2
     );
 }
+
+#[test]
+fn builtin_exit_terminates_program() {
+    assert_eq!(
+        run("fn f() -> i64 { exit(5) }\nfn main() -> i64 { f() }"),
+        5
+    );
+}
+
+#[test]
+fn builtin_println_returns_unit() {
+    // println writes to the test process's stdout — harmless output,
+    // and the call must produce `()` so the fn tail stays i64.
+    assert_eq!(run("fn main() -> i64 { println(\"interp\")\n 9 }"), 9);
+}

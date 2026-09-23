@@ -12,7 +12,7 @@
 //! query — accumulated output can never go stale.
 
 use aura_ast::{BinOp, BlockId, Expr, ExprId, Literal, Pattern, Stmt, TypeExpr, TypeExprId, UnOp};
-use aura_common::{Diagnostic, Span, codes};
+use aura_common::{BuiltinFn, Diagnostic, Span, codes};
 use aura_salsa_db::{
     Body, Db, FileItems, ItemSig, Project, SourceFile, TypeName, file_items, fn_body, project_items,
 };
@@ -327,6 +327,9 @@ impl Checker<'_> {
         match self.res.lookup(self.name(name)) {
             Some(Def::Fn(idx)) => fn_type(self.items, idx),
             Some(Def::ExternFn(block, f)) => extern_fn_type(self.items, block, f),
+            // Prelude builtins — `print`/`println`/`eprint`/`eprintln`
+            // are `fn(str)`, `exit` is `fn(i64) -> !`.
+            Some(Def::Builtin(b)) => builtin_fn_type(b),
             Some(Def::Variant(e, v)) => {
                 let payload = enum_variant_payload(self.items, e, v);
                 if payload.is_empty() {
@@ -1103,6 +1106,23 @@ fn fn_type(items: &FileItems, idx: u32) -> Type {
             ),
         },
         _ => Type::Error,
+    }
+}
+
+/// Signature of a prelude builtin — `print`-family is `fn(str)`,
+/// `exit` is `fn(i64) -> !`.
+fn builtin_fn_type(b: BuiltinFn) -> Type {
+    match b {
+        BuiltinFn::Print | BuiltinFn::Println | BuiltinFn::Eprint | BuiltinFn::Eprintln => {
+            Type::Fn {
+                params: vec![Type::Str],
+                ret: Box::new(Type::Unit),
+            }
+        }
+        BuiltinFn::Exit => Type::Fn {
+            params: vec![Type::Int(IntTy::I64)],
+            ret: Box::new(Type::Never),
+        },
     }
 }
 

@@ -164,6 +164,31 @@ fn run_strings_fixture_returns_6() {
 }
 
 #[test]
+fn run_print_fixture_outputs_hello_and_exits_3() {
+    if runtime_lib().is_none() {
+        return;
+    }
+    let out = aura(&["run", fixture("print.aura").to_str().unwrap()]);
+    // print.aura: println → stdout, eprintln → stderr, exit(3).
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("Hello, World!"),
+        "stdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("warn"),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
 fn run_result_err_path_returns_3() {
     if runtime_lib().is_none() {
         return;

@@ -424,3 +424,41 @@ fn extern_str_return_diagnosed() {
         codes::SEM_EXTERN_AGGREGATE,
     );
 }
+
+// ----- prelude builtins ---------------------------------------------------------
+
+#[test]
+fn builtin_calls_clean() {
+    let src = "\
+fn main() -> i64 {
+    println(\"hi\")
+    eprint(\"w\")
+    if exit_code() == 1 { exit(1) }
+    0
+}
+fn exit_code() -> i64 { 1 }
+";
+    assert!(diags(src).is_empty(), "{:?}", diags(src));
+}
+
+#[test]
+fn builtin_arg_type_mismatch() {
+    assert_has(
+        "fn main() -> i64 { println(42)\n 0 }",
+        codes::SEM_TYPE_MISMATCH,
+    );
+}
+
+#[test]
+fn builtin_exit_never_unifies() {
+    let src = "fn f() -> i64 { exit(1) }\nfn main() -> i64 { f() }";
+    assert!(diags(src).is_empty(), "{:?}", diags(src));
+}
+
+#[test]
+fn user_def_shadows_builtin() {
+    // A file-local `println` wins over the prelude builtin — the call
+    // resolves to the user fn (which returns i64, so the tail checks).
+    let src = "fn println(s: str) -> i64 { 7 }\nfn main() -> i64 { println(\"x\") }";
+    assert!(diags(src).is_empty(), "{:?}", diags(src));
+}

@@ -10,6 +10,7 @@
 //! [`Resolution::duplicates`] data — `check_file` attaches the spans and
 //! emits `E2003`, since this query deliberately carries no positions.
 
+use aura_common::BuiltinFn;
 use aura_salsa_db::{Db, FileItems, ItemSig, Project, SourceFile, file_items, project_items};
 use indexmap::IndexMap;
 
@@ -31,6 +32,9 @@ pub enum Def {
     ResultOk,
     /// Built-in `Err` constructor of `Result<T, E>`.
     ResultErr,
+    /// Prelude function implemented by the runtime (`println`, `exit`, …)
+    /// — a file-local definition shadows it.
+    Builtin(BuiltinFn),
 }
 
 /// A redefinition: `name` defined at both `first` and `dup` item indices.
@@ -103,9 +107,13 @@ fn resolve_items(items: &FileItems) -> Resolution {
             ItemSig::Use { .. } | ItemSig::Error => {}
         }
     }
-    // Prelude: `Ok`/`Err` constructors — file-local definitions win.
+    // Prelude: `Ok`/`Err` constructors + runtime builtins — file-local
+    // definitions win.
     res.defs.entry("Ok".into()).or_insert(Def::ResultOk);
     res.defs.entry("Err".into()).or_insert(Def::ResultErr);
+    for &b in BuiltinFn::ALL {
+        res.defs.entry(b.name().into()).or_insert(Def::Builtin(b));
+    }
     res
 }
 
@@ -120,7 +128,7 @@ fn insert(res: &mut Resolution, name: &str, item: u32, def: Def) {
                 | Def::ExternFn(i, _),
             ) => *i,
             // Prelude defs never reach `insert` — covered for exhaustiveness.
-            Some(Def::ResultOk | Def::ResultErr) | None => item,
+            Some(Def::ResultOk | Def::ResultErr | Def::Builtin(_)) | None => item,
         };
         res.duplicates.push(Duplicate {
             name: name.to_owned(),

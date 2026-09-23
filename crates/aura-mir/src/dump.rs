@@ -142,6 +142,7 @@ fn rvalue(r: &Rvalue) -> String {
             let f = match callee {
                 crate::Callee::Fn(i) => format!("fn#{i}"),
                 crate::Callee::Extern(b, f) => format!("ext#{b}.{f}"),
+                crate::Callee::Builtin(b) => format!("builtin {}", b.name()),
             };
             let a: Vec<String> = args.iter().map(operand).collect();
             format!("{f}({})", a.join(", "))

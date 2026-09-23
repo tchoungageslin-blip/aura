@@ -11,6 +11,65 @@ pub use diagnostic::{Diagnostic, DiagnosticSink, Label, Severity};
 pub use render::{SourceCache, render_diagnostics};
 pub use span::{FileId, Span};
 
+/// Prelude functions implemented by the runtime, callable like ordinary
+/// `fn`s — name resolution binds these to builtin defs; codegen maps
+/// each call to a runtime import.
+///
+/// `str` arguments are passed as the flattened `{ptr, len}` pair — the
+/// runtime ABI stays scalar-only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BuiltinFn {
+    /// `print(s: str)` — write `s`'s bytes to stdout.
+    Print,
+    /// `println(s: str)` — `print` plus a newline.
+    Println,
+    /// `eprint(s: str)` — write `s`'s bytes to stderr.
+    Eprint,
+    /// `eprintln(s: str)` — `eprint` plus a newline.
+    Eprintln,
+    /// `exit(code: i64) -> !` — terminate the process.
+    Exit,
+}
+
+impl BuiltinFn {
+    /// Every builtin, for prelude injection.
+    pub const ALL: &[Self] = &[
+        Self::Print,
+        Self::Println,
+        Self::Eprint,
+        Self::Eprintln,
+        Self::Exit,
+    ];
+
+    /// Source-level name (`println`, `exit`, …).
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Print => "print",
+            Self::Println => "println",
+            Self::Eprint => "eprint",
+            Self::Eprintln => "eprintln",
+            Self::Exit => "exit",
+        }
+    }
+
+    /// Symbol imported from `aura_runtime`.
+    pub fn runtime_symbol(self) -> &'static str {
+        match self {
+            Self::Print => "aura_rt_print",
+            Self::Println => "aura_rt_println",
+            Self::Eprint => "aura_rt_eprint",
+            Self::Eprintln => "aura_rt_eprintln",
+            Self::Exit => "aura_rt_exit",
+        }
+    }
+
+    /// Does the call take a `str` argument (passed as `{ptr, len}`)?
+    /// `false` means the single `i64` exit-code argument.
+    pub fn takes_str(self) -> bool {
+        !matches!(self, Self::Exit)
+    }
+}
+
 /// Namespaced error codes. Each compiler phase owns a range:
 /// `E0xxx` lexer, `E1xxx` parser, `E2xxx` semantic, `E3xxx` codegen.
 pub mod codes {

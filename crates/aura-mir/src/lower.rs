@@ -547,6 +547,7 @@ impl Lowerer<'_> {
                 match self.res.lookup(self.name(*name)) {
                     Some(Def::Fn(i)) => Callee::Fn(i),
                     Some(Def::ExternFn(b, f)) => Callee::Extern(b, f),
+                    Some(Def::Builtin(b)) => Callee::Builtin(b),
                     Some(Def::Variant(e, vi)) => {
                         let ops: Vec<Operand> = args.iter().map(|&a| self.expr(a)).collect();
                         return self.enum_lit(e, vi, ops, id);

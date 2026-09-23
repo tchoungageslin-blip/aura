@@ -407,7 +407,7 @@ fn definition_at(
         Def::Fn(i) | Def::Struct(i) | Def::Enum(i) => i,
         Def::Variant(enum_i, _) => enum_i,
         Def::ExternFn(block_i, _) => block_i,
-        Def::ResultOk | Def::ResultErr => return None, // builtins have no source
+        Def::ResultOk | Def::ResultErr | Def::Builtin(_) => return None, // builtins have no source
     };
     let span = parsed(db, doc.input)
         .items
@@ -448,7 +448,7 @@ fn completions(db: &AuraDatabase, doc: &Document) -> CompletionResponse {
     let res = resolved_file(db, doc.input);
     for (name, def) in &res.defs {
         let kind = match def {
-            Def::Fn(_) | Def::ExternFn(..) => CompletionItemKind::FUNCTION,
+            Def::Fn(_) | Def::ExternFn(..) | Def::Builtin(_) => CompletionItemKind::FUNCTION,
             Def::Struct(_) => CompletionItemKind::STRUCT,
             Def::Enum(_) => CompletionItemKind::ENUM,
             Def::Variant(..) | Def::ResultOk | Def::ResultErr => CompletionItemKind::ENUM_MEMBER,
@@ -483,7 +483,7 @@ fn references_at(
             Def::Fn(i) | Def::Struct(i) | Def::Enum(i) => i,
             Def::Variant(enum_i, _) => enum_i,
             Def::ExternFn(block_i, _) => block_i,
-            Def::ResultOk | Def::ResultErr => u32::MAX,
+            Def::ResultOk | Def::ResultErr | Def::Builtin(_) => u32::MAX,
         };
         if let Some(item) = parsed(db, doc.input).items.get(item_idx as usize) {
             out.push(Location {

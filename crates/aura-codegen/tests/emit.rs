@@ -150,3 +150,15 @@ fn str_param_return_and_struct_field_emit() {
     assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
     assert!(out.object.is_some());
 }
+
+#[test]
+fn builtin_print_imports_aura_rt_println() {
+    let out = compile("fn main() -> i64 { println(\"hi\")\n 0 }");
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    let obj = out.object.expect("object expected");
+    assert!(
+        obj.windows(b"aura_rt_println".len())
+            .any(|w| w == b"aura_rt_println"),
+        "object must import aura_rt_println"
+    );
+}
