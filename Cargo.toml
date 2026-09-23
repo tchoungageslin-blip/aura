@@ -19,6 +19,7 @@ aura-semantic = { path = "crates/aura-semantic" }
 aura-hir = { path = "crates/aura-hir" }
 aura-mir = { path = "crates/aura-mir" }
 aura-codegen = { path = "crates/aura-codegen" }
+aura-fmt = { path = "crates/aura-fmt" }
 aura-linker = { path = "crates/aura-linker" }
 
 # External crates — versions resolved at build time, pinned via Cargo.lock

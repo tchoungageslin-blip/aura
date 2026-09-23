@@ -112,6 +112,7 @@ version = "0.1.0-alpha"
 dependencies = [
  "aura-codegen",
  "aura-common",
+ "aura-fmt",
  "aura-linker",
  "aura-mir",
  "aura-parser",
@@ -147,6 +148,16 @@ dependencies = [
  "ariadne",
  "insta",
  "thiserror",
+]
+
+[[package]]
+name = "aura-fmt"
+version = "0.1.0-alpha"
+dependencies = [
+ "aura-ast",
+ "aura-common",
+ "aura-parser",
+ "lasso",
 ]
 
 [[package]]

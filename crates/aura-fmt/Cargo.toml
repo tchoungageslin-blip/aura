@@ -1,0 +1,17 @@
+[package]
+name = "aura-fmt"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+aura-ast.workspace = true
+aura-common.workspace = true
+aura-parser.workspace = true
+lasso.workspace = true
+
+[dev-dependencies]
+aura-parser.workspace = true

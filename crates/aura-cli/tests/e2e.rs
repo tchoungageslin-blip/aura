@@ -174,6 +174,39 @@ fn run_result_err_path_returns_3() {
 }
 
 #[test]
+fn fmt_rewrites_in_place_and_check_mode() {
+    let dir = std::env::temp_dir().join(format!("aura-e2e-fmt-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let src = dir.join("ugly.aura");
+    std::fs::write(&src, "fn   f(x:i64)->i64{x+1}\n").unwrap();
+    // In-place rewrite.
+    let out = aura(&["fmt", src.to_str().unwrap()]);
+    assert!(out.status.success());
+    let text = std::fs::read_to_string(&src).unwrap();
+    assert_eq!(text, "fn f(x: i64) -> i64 {\n    x + 1\n}\n");
+    // --check passes on formatted text, fails on unformatted.
+    let ok = aura(&["fmt", "--check", src.to_str().unwrap()]);
+    assert!(ok.status.success());
+    std::fs::write(&src, "fn g()->i64{0}\n").unwrap();
+    let dirty = aura(&["fmt", "--check", src.to_str().unwrap()]);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(!dirty.status.success());
+}
+
+#[test]
+fn fmt_refuses_parse_errors() {
+    let dir = std::env::temp_dir().join(format!("aura-e2e-fmtbad-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let src = dir.join("bad.aura");
+    std::fs::write(&src, "fn f( -> {}\n").unwrap();
+    let out = aura(&["fmt", src.to_str().unwrap()]);
+    // File must be untouched.
+    assert_eq!(std::fs::read_to_string(&src).unwrap(), "fn f( -> {}\n");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(!out.status.success());
+}
+
+#[test]
 fn run_propagates_exit_code() {
     if runtime_lib().is_none() {
         return;

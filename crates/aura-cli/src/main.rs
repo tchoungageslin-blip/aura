@@ -43,6 +43,16 @@ enum Command {
     },
     /// Compile, link, and run a file.
     Run { path: PathBuf },
+    /// Format a file canonically (in place unless --check/--stdout).
+    Fmt {
+        path: PathBuf,
+        /// Exit non-zero if the file isn't already formatted.
+        #[arg(long)]
+        check: bool,
+        /// Print the formatted source instead of rewriting the file.
+        #[arg(long)]
+        stdout: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -53,6 +63,11 @@ fn main() -> ExitCode {
         Command::Mir { path } => mir(&path),
         Command::Build { path, output } => build(&path, output.as_deref()),
         Command::Run { path } => run(&path),
+        Command::Fmt {
+            path,
+            check,
+            stdout,
+        } => fmt(&path, check, stdout),
     }
 }
 
@@ -237,6 +252,44 @@ fn build(path: &Path, output: Option<&Path>) -> ExitCode {
         return ExitCode::FAILURE;
     }
     link(&obj, &out)
+}
+
+fn fmt(path: &Path, check: bool, to_stdout: bool) -> ExitCode {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("error: cannot read {}: {e}", path.display());
+            return ExitCode::FAILURE;
+        }
+    };
+    let formatted = match aura_fmt::format_source(&text) {
+        Ok(f) => f,
+        Err(diags) => {
+            let mut cache = SourceCache::new();
+            cache.add(path.display().to_string(), text);
+            eprintln!("error: cannot format {} — parse errors:", path.display());
+            render(&diags, &cache);
+            return ExitCode::FAILURE;
+        }
+    };
+    if check {
+        if formatted == text {
+            return ExitCode::SUCCESS;
+        }
+        eprintln!("error: {} is not formatted", path.display());
+        return ExitCode::FAILURE;
+    }
+    if to_stdout {
+        print!("{formatted}");
+        return ExitCode::SUCCESS;
+    }
+    match std::fs::write(path, formatted) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("error: cannot write {}: {e}", path.display());
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn run(path: &Path) -> ExitCode {
