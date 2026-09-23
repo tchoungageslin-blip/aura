@@ -199,6 +199,23 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Recovery inside an item body (struct fields, enum variants, extern
+    /// fns): stop at a member boundary — `,`, newline, `}`, or EOF.
+    fn synchronize_member(&mut self) {
+        loop {
+            match self.kind() {
+                TokenKind::Eof | TokenKind::RBrace => return,
+                TokenKind::Comma | TokenKind::Newline => {
+                    self.bump();
+                    return;
+                }
+                _ => {
+                    self.bump();
+                }
+            }
+        }
+    }
+
     /// Recovery inside a block: stop at statement-ish tokens or `}`.
     fn synchronize_stmt(&mut self) {
         loop {

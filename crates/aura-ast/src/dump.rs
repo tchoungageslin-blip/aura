@@ -310,7 +310,16 @@ impl<'a> Dumper<'a> {
             Literal::Unit => self.out.push_str("()"),
             Literal::Str(s) => {
                 self.out.push('"');
-                self.out.push_str(self.name(*s));
+                for c in self.name(*s).chars() {
+                    match c {
+                        '\n' => self.out.push_str("\\n"),
+                        '\t' => self.out.push_str("\\t"),
+                        '\r' => self.out.push_str("\\r"),
+                        '\\' => self.out.push_str("\\\\"),
+                        '"' => self.out.push_str("\\\""),
+                        c => self.out.push(c),
+                    }
+                }
                 self.out.push('"');
             }
         }

@@ -296,46 +296,7 @@ impl Parser<'_> {
 
     fn ty_inner(&mut self, t: aura_lexer::Token) -> TypeExprId {
         match t.kind {
-            TokenKind::Ident => {
-                self.bump();
-                let name = t.sym.unwrap();
-                let mut generic_args = Vec::new();
-                if self.at(TokenKind::Lt) {
-                    self.bump();
-                    loop {
-                        if self.at(TokenKind::Gt) {
-                            self.bump();
-                            break;
-                        }
-                        if self.at(TokenKind::Eof) {
-                            break;
-                        }
-                        generic_args.push(self.ty());
-                        if self.at(TokenKind::Comma) {
-                            self.bump();
-                        } else if self.at(TokenKind::Gt) {
-                            self.bump();
-                            break;
-                        } else {
-                            let bad = self.token();
-                            self.diags.error(
-                                codes::PARSE_UNEXPECTED_TOKEN,
-                                format!(
-                                    "expected `,` or `>` in generic args, found {}",
-                                    bad.kind.describe()
-                                ),
-                                bad.span,
-                            );
-                            break;
-                        }
-                    }
-                }
-                let end = self.prev_end();
-                self.ast.types.alloc(
-                    aura_ast::TypeExpr::Named { name, generic_args },
-                    Span::new(self.file, t.span.start, end),
-                )
-            }
+            TokenKind::Ident => self.named_ty(t),
             TokenKind::Star => {
                 // `*const T` / `*mut T`
                 self.bump();
@@ -397,6 +358,48 @@ impl Parser<'_> {
                 self.ast.types.alloc(aura_ast::TypeExpr::Error, t.span)
             }
         }
+    }
+
+    /// `Name` or `Name<T, U>` — named type with optional generic arguments.
+    fn named_ty(&mut self, t: aura_lexer::Token) -> TypeExprId {
+        self.bump();
+        let name = t.sym.unwrap();
+        let mut generic_args = Vec::new();
+        if self.at(TokenKind::Lt) {
+            self.bump();
+            loop {
+                if self.at(TokenKind::Gt) {
+                    self.bump();
+                    break;
+                }
+                if self.at(TokenKind::Eof) {
+                    break;
+                }
+                generic_args.push(self.ty());
+                if self.at(TokenKind::Comma) {
+                    self.bump();
+                } else if self.at(TokenKind::Gt) {
+                    self.bump();
+                    break;
+                } else {
+                    let bad = self.token();
+                    self.diags.error(
+                        codes::PARSE_UNEXPECTED_TOKEN,
+                        format!(
+                            "expected `,` or `>` in generic args, found {}",
+                            bad.kind.describe()
+                        ),
+                        bad.span,
+                    );
+                    break;
+                }
+            }
+        }
+        let end = self.prev_end();
+        self.ast.types.alloc(
+            aura_ast::TypeExpr::Named { name, generic_args },
+            Span::new(self.file, t.span.start, end),
+        )
     }
 
     /// Resolve a `Spur` to text — convenience for tests/diagnostics.

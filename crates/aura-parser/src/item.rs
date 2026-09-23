@@ -169,21 +169,22 @@ impl Parser<'_> {
                     );
                     self.bump();
                 }
+                // separator: `,` and/or newline — both optional between fields
                 self.skip_newlines();
                 if self.at(TokenKind::Comma) {
                     self.bump();
                     self.skip_newlines();
-                } else if !self.at(TokenKind::RBrace) {
+                } else if !self.at(TokenKind::RBrace) && !self.at(TokenKind::Ident) {
                     let t = self.token();
                     self.diags.error(
                         codes::PARSE_UNEXPECTED_TOKEN,
                         format!(
-                            "expected `,` or `}}` in struct, found {}",
+                            "expected `,`, newline, or `}}` in struct, found {}",
                             t.kind.describe()
                         ),
                         t.span,
                     );
-                    self.synchronize_item();
+                    self.synchronize_member();
                 }
             }
             self.expect(TokenKind::RBrace, "closing `}` after struct fields");
@@ -238,18 +239,22 @@ impl Parser<'_> {
                     );
                     self.bump();
                 }
+                // separator: `,` and/or newline — both optional between variants
                 self.skip_newlines();
                 if self.at(TokenKind::Comma) {
                     self.bump();
                     self.skip_newlines();
-                } else if !self.at(TokenKind::RBrace) {
+                } else if !self.at(TokenKind::RBrace) && !self.at(TokenKind::Ident) {
                     let t = self.token();
                     self.diags.error(
                         codes::PARSE_UNEXPECTED_TOKEN,
-                        format!("expected `,` or `}}` in enum, found {}", t.kind.describe()),
+                        format!(
+                            "expected `,`, newline, or `}}` in enum, found {}",
+                            t.kind.describe()
+                        ),
                         t.span,
                     );
-                    self.synchronize_item();
+                    self.synchronize_member();
                 }
             }
             self.expect(TokenKind::RBrace, "closing `}` after enum variants");

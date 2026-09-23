@@ -82,6 +82,7 @@ impl TokenKind {
                 | TokenKind::LBrace
                 | TokenKind::If
                 | TokenKind::Match
+                | TokenKind::Unsafe
                 | TokenKind::Minus
                 | TokenKind::Bang
         )

@@ -1,0 +1,7 @@
+---
+source: crates/aura-parser/tests/parse.rs
+expression: dump(src)
+---
+(struct Vec2 (x: f64) (y: f64))
+(fn length (params v: Vec2) -> f64 (block (let sq = (+ (* (. v x) (. v x)) (* (. v y) (. v y)))) (call sqrt sq)))
+(fn main (params) (block (let p = (Vec2 x: 3 y: 4)) (let len = (call length p)) (if (> len 0) (block (call print_f64 len)) (block (call print_str "zero")))))
