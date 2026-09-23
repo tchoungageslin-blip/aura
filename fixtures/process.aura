@@ -1,0 +1,16 @@
+// process/env builtins — `args() -> vec<str>` and `env(str) -> str`,
+// crossing the vec<str> runtime boundary end-to-end.
+fn main() -> i64 {
+    let a = args()
+    let path = env("PATH")
+    let missing = env("AURA_NO_SUCH_VAR_456")
+    println(vec_get(a, 0))
+    if a.len >= 1 && path.len > 0 && missing == "" { vec_get(a, 0).len != 0 }
+    let mut total = 0
+    let mut i = 0
+    while i < a.len {
+        total = total + vec_get(a, i).len
+        i = i + 1
+    }
+    if total > 0 { 13 } else { 0 }
+}

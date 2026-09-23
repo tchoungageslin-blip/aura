@@ -37,6 +37,10 @@ pub enum BuiltinFn {
     VecGet,
     /// `vec_set<T>(v: vec<T>, i: usize, x: T)` — bounds-checked store.
     VecSet,
+    /// `args() -> vec<str>` — process command line, program name first.
+    Args,
+    /// `env(name: str) -> str` — environment variable value or `""`.
+    Env,
 }
 
 impl BuiltinFn {
@@ -51,6 +55,8 @@ impl BuiltinFn {
         Self::VecPush,
         Self::VecGet,
         Self::VecSet,
+        Self::Args,
+        Self::Env,
     ];
 
     /// Source-level name (`println`, `exit`, `vec_push`, …).
@@ -65,6 +71,8 @@ impl BuiltinFn {
             Self::VecPush => "vec_push",
             Self::VecGet => "vec_get",
             Self::VecSet => "vec_set",
+            Self::Args => "args",
+            Self::Env => "env",
         }
     }
 
@@ -80,6 +88,8 @@ impl BuiltinFn {
             Self::Exit => "aura_rt_exit",
             Self::VecPush => "aura_vec_push",
             Self::VecGet => "aura_vec_get",
+            Self::Args => "aura_rt_args",
+            Self::Env => "aura_rt_env",
             Self::VecNew | Self::VecSet => "",
         }
     }

@@ -243,6 +243,10 @@ fn declare_builtins(
                 sig.params.extend([AbiParam::new(ptr); 4]);
                 sig.returns.push(AbiParam::new(ptr));
             }
+            // (out: *mut {ptr,len,cap}) — runtime fills the vec triple
+            BuiltinFn::Args => sig.params.push(AbiParam::new(ptr)),
+            // (name_ptr, name_len, out: *mut {ptr,len})
+            BuiltinFn::Env => sig.params.extend([AbiParam::new(ptr); 3]),
             BuiltinFn::VecNew | BuiltinFn::VecSet => unreachable!(),
         }
         let id = module
@@ -743,6 +747,29 @@ impl FnGen<'_, '_> {
             BuiltinFn::VecPush => self.vec_push(args),
             BuiltinFn::VecGet => self.vec_get_elem(dest, args),
             BuiltinFn::VecSet => self.vec_set(args),
+            BuiltinFn::Args => {
+                // `aura_rt_args(out)` — the runtime writes the whole
+                // `{ptr,len,cap}` vec<str> triple into `dest`.
+                let da = self.place_addr(dest);
+                self.call_builtin_sym(b, &[da]);
+            }
+            BuiltinFn::Env => {
+                // `aura_rt_env(name.ptr, name.len, out)` — writes the
+                // `{ptr,len}` str into `dest`.
+                let Some(op) = args.first() else { return };
+                let len_off = i32::try_from(self.ptr.bytes()).unwrap_or(i32::MAX);
+                let base = self.operand_addr(op);
+                let np = self
+                    .b
+                    .ins()
+                    .load(self.ptr, MemFlagsData::trusted(), base, 0);
+                let nl = self
+                    .b
+                    .ins()
+                    .load(self.ptr, MemFlagsData::trusted(), base, len_off);
+                let da = self.place_addr(dest);
+                self.call_builtin_sym(b, &[np, nl, da]);
+            }
         }
     }
 

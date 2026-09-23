@@ -260,3 +260,9 @@ fn vec_oob_is_error() {
     let src = "fn main() -> i64 { let v = vec_new()\n vec_push(v, 1)\n vec_get(v, 5) }";
     assert!(matches!(run_err(src), InterpError::Type(_)));
 }
+
+#[test]
+fn args_and_env() {
+    let src = "fn main() -> i64 { let a = args()\n let p = env(\"PATH\")\n let missing = env(\"NO_SUCH_AURA_VAR_123\")\n if a.len >= 1 && p.len > 0 && missing == \"\" { 5 } else { 0 } }";
+    assert_eq!(run(src), 5);
+}

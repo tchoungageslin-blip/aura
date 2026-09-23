@@ -1197,6 +1197,14 @@ fn builtin_fn_type(infer: &mut InferCtx, b: BuiltinFn) -> Type {
                 ret: Box::new(t),
             }
         }
+        BuiltinFn::Args => Type::Fn {
+            params: Vec::new(),
+            ret: Box::new(Type::Vec(Box::new(Type::Str))),
+        },
+        BuiltinFn::Env => Type::Fn {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Str),
+        },
     }
 }
 

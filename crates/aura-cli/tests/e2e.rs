@@ -180,6 +180,22 @@ fn run_vec_fixture_returns_11() {
 }
 
 #[test]
+fn run_process_fixture_returns_13() {
+    if runtime_lib().is_none() {
+        return;
+    }
+    let out = aura(&["run", fixture("process.aura").to_str().unwrap()]);
+    // process.aura: args() has >= 1 elem, PATH set, missing var is "" → 13.
+    assert_eq!(
+        out.status.code(),
+        Some(13),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
 fn run_print_fixture_outputs_hello_and_exits_3() {
     if runtime_lib().is_none() {
         return;
@@ -326,6 +342,7 @@ fn differential_interp_matches_compiled() {
         "result.aura",
         "strings.aura",
         "vec.aura",
+        "process.aura",
     ] {
         let path = fixture(name);
         let path = path.to_str().unwrap();

@@ -530,3 +530,9 @@ fn vec_extern_aggregate_rejected() {
         codes::SEM_EXTERN_AGGREGATE,
     );
 }
+
+#[test]
+fn args_and_env_clean() {
+    let src = "fn main() -> i64 { let a = args()\n let e = env(\"PATH\")\n if a.len >= 1 && e.len > 0 { 1 } else { 0 } }";
+    assert!(diags(src).is_empty(), "{:?}", diags(src));
+}

@@ -53,6 +53,118 @@ unsafe extern "C" {
         written: *mut u32,
         overlapped: *mut c_void,
     ) -> i32;
+    fn GetCommandLineW() -> *const u16;
+    fn LocalFree(ptr: *mut c_void) -> *mut c_void;
+    fn GetEnvironmentVariableW(name: *const u16, buf: *mut u16, size: u32) -> u32;
+    fn WideCharToMultiByte(
+        cp: u32,
+        flags: u32,
+        wide: *const u16,
+        wide_len: i32,
+        multi: *mut u8,
+        multi_len: i32,
+        default_char: *const u8,
+        used_default: *mut i32,
+    ) -> i32;
+    fn MultiByteToWideChar(
+        cp: u32,
+        flags: u32,
+        multi: *const u8,
+        multi_len: i32,
+        wide: *mut u16,
+        wide_len: i32,
+    ) -> i32;
+}
+
+#[cfg(target_os = "windows")]
+#[link(name = "shell32", kind = "raw-dylib")]
+unsafe extern "C" {
+    fn CommandLineToArgvW(cmd: *const u16, argc: *mut i32) -> *mut *mut u16;
+}
+
+/// UTF-8 code page for the `*ToMultiByte`/`MultiByteTo*` conversions.
+#[cfg(target_os = "windows")]
+const CP_UTF8: u32 = 65001;
+
+/// Aura's `str` as the runtime sees it — `{ptr, len}`.
+#[cfg(target_os = "windows")]
+#[repr(C)]
+pub struct RawStr {
+    ptr: *mut u8,
+    len: usize,
+}
+
+/// Aura's `vec<str>` as the runtime sees it — `{ptr, len, cap}` where
+/// `ptr` addresses a flat `RawStr` array.
+#[cfg(target_os = "windows")]
+#[repr(C)]
+pub struct RawVec {
+    ptr: *mut u8,
+    len: usize,
+    cap: usize,
+}
+
+/// NUL-terminated UTF-16 length (no `lstrlenW` import needed).
+#[cfg(target_os = "windows")]
+unsafe fn wstrlen(s: *const u16) -> usize {
+    let mut n = 0;
+    while unsafe { *s.add(n) } != 0 {
+        n += 1;
+    }
+    n
+}
+
+/// UTF-16 → freshly allocated UTF-8 buffer; `(ptr, len)` — `ptr` is
+/// `aura_rt_alloc`-owned. Empty/NULL input yields `{null, 0}`.
+#[cfg(target_os = "windows")]
+unsafe fn wstr_to_utf8(w: *const u16, wlen: usize) -> RawStr {
+    if w.is_null() || wlen == 0 {
+        return RawStr {
+            ptr: core::ptr::null_mut(),
+            len: 0,
+        };
+    }
+    let need = unsafe {
+        WideCharToMultiByte(
+            CP_UTF8,
+            0,
+            w,
+            i32::try_from(wlen).unwrap_or(i32::MAX),
+            core::ptr::null_mut(),
+            0,
+            core::ptr::null(),
+            core::ptr::null_mut(),
+        )
+    };
+    if need <= 0 {
+        return RawStr {
+            ptr: core::ptr::null_mut(),
+            len: 0,
+        };
+    }
+    let buf = aura_rt_alloc(usize::try_from(need).unwrap_or(usize::MAX));
+    if buf.is_null() {
+        return RawStr {
+            ptr: core::ptr::null_mut(),
+            len: 0,
+        };
+    }
+    let wrote = unsafe {
+        WideCharToMultiByte(
+            CP_UTF8,
+            0,
+            w,
+            i32::try_from(wlen).unwrap_or(i32::MAX),
+            buf,
+            need,
+            core::ptr::null(),
+            core::ptr::null_mut(),
+        )
+    };
+    RawStr {
+        ptr: buf,
+        len: usize::try_from(wrote).unwrap_or(0),
+    }
 }
 
 /// PE console entry point. The loader starts here; we delegate to the
@@ -482,4 +594,123 @@ pub unsafe extern "C" fn aura_vec_get(
         unsafe { ExitProcess(101) };
     }
     unsafe { data.add(idx * esize) }
+}
+
+// ----- process / env -----------------------------------------------------------
+
+/// `args() -> vec<str>` — writes a `{ptr, len, cap}` triple at `out`
+/// whose `ptr` addresses `argc` `RawStr` elements (program name first).
+/// All buffers are `aura_rt_alloc`-owned; empty argv yields a null vec.
+///
+/// # Safety
+/// `out` must be writable for a `RawVec`.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_rt_args(out: *mut RawVec) {
+    if out.is_null() {
+        return;
+    }
+    let mut argc: i32 = 0;
+    let argv = unsafe { CommandLineToArgvW(GetCommandLineW(), &mut argc) };
+    let count = usize::try_from(argc).unwrap_or(0);
+    if argv.is_null() || count == 0 {
+        unsafe {
+            *out = RawVec {
+                ptr: core::ptr::null_mut(),
+                len: 0,
+                cap: 0,
+            }
+        };
+        return;
+    }
+    let elems = aura_rt_alloc(count.saturating_mul(core::mem::size_of::<RawStr>())) as *mut RawStr;
+    if elems.is_null() {
+        unsafe { ExitProcess(14) };
+    }
+    for i in 0..count {
+        let w = unsafe { *argv.add(i) };
+        let s = unsafe { wstr_to_utf8(w, wstrlen(w)) };
+        unsafe { *elems.add(i) = s };
+    }
+    unsafe { LocalFree(argv.cast()) };
+    unsafe {
+        *out = RawVec {
+            ptr: elems.cast(),
+            len: count,
+            cap: count,
+        }
+    };
+}
+
+/// `env(name: str) -> str` — writes `{ptr, len}` at `out`; a missing
+/// variable yields `{null, 0}` (reads as `""`).
+///
+/// # Safety
+/// `name` must be valid for `name_len` bytes; `out` must be writable
+/// for a `RawStr`.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_rt_env(name: *const u8, name_len: usize, out: *mut RawStr) {
+    let empty = RawStr {
+        ptr: core::ptr::null_mut(),
+        len: 0,
+    };
+    if out.is_null() {
+        return;
+    }
+    if name.is_null() || name_len == 0 {
+        unsafe { *out = empty };
+        return;
+    }
+    // UTF-8 name → NUL-terminated UTF-16.
+    let wlen = unsafe {
+        MultiByteToWideChar(
+            CP_UTF8,
+            0,
+            name,
+            i32::try_from(name_len).unwrap_or(i32::MAX),
+            core::ptr::null_mut(),
+            0,
+        )
+    };
+    if wlen <= 0 {
+        unsafe { *out = empty };
+        return;
+    }
+    let wname = aura_rt_alloc((usize::try_from(wlen).unwrap_or(usize::MAX) + 1) * 2) as *mut u16;
+    if wname.is_null() {
+        unsafe { ExitProcess(14) };
+    }
+    unsafe {
+        MultiByteToWideChar(
+            CP_UTF8,
+            0,
+            name,
+            i32::try_from(name_len).unwrap_or(i32::MAX),
+            wname,
+            wlen,
+        );
+        *wname.add(usize::try_from(wlen).unwrap_or(usize::MAX)) = 0;
+    }
+    // Value length in UTF-16 units, then UTF-16 → UTF-8.
+    let need = unsafe { GetEnvironmentVariableW(wname, core::ptr::null_mut(), 0) };
+    if need == 0 {
+        unsafe { aura_rt_free(wname.cast()) };
+        unsafe { *out = empty };
+        return;
+    }
+    let wbuf = aura_rt_alloc(usize::try_from(need).unwrap_or(usize::MAX) * 2) as *mut u16;
+    if wbuf.is_null() {
+        unsafe { ExitProcess(14) };
+    }
+    let got = unsafe { GetEnvironmentVariableW(wname, wbuf, need) };
+    unsafe { aura_rt_free(wname.cast()) };
+    if got == 0 {
+        unsafe { aura_rt_free(wbuf.cast()) };
+        unsafe { *out = empty };
+        return;
+    }
+    let s = unsafe { wstr_to_utf8(wbuf, usize::try_from(got).unwrap_or(0)) };
+    unsafe { aura_rt_free(wbuf.cast()) };
+    unsafe { *out = s };
 }

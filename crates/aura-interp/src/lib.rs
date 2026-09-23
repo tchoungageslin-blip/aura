@@ -225,6 +225,8 @@ enum Builtin {
     VecPush,
     VecGet,
     VecSet,
+    Args,
+    Env,
 }
 
 /// The interpreter: item tables plus a scope stack and fuel.
@@ -819,6 +821,8 @@ impl Builtin {
             "vec_push" => Some(Self::VecPush),
             "vec_get" => Some(Self::VecGet),
             "vec_set" => Some(Self::VecSet),
+            "args" => Some(Self::Args),
+            "env" => Some(Self::Env),
             _ => None,
         }
     }
@@ -879,6 +883,14 @@ impl Builtin {
                 *slot = x.clone();
                 Ok(Value::Unit)
             }
+            (Self::Args, []) => Ok(Value::Vec(Rc::new(RefCell::new(
+                std::env::args()
+                    .map(|a| Value::Str(Rc::from(a.as_str())))
+                    .collect(),
+            )))),
+            (Self::Env, [Value::Str(name)]) => Ok(Value::Str(Rc::from(
+                std::env::var(name.as_ref()).unwrap_or_default().as_str(),
+            ))),
             _ => Err(InterpError::Type("bad builtin args".into())),
         }
     }

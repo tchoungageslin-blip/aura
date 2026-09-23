@@ -194,3 +194,22 @@ fn vec_ops_import_aura_vec_helpers() {
         "object must import aura_vec_get"
     );
 }
+
+#[test]
+fn args_env_import_runtime_symbols() {
+    let out = compile(
+        "fn main() -> i64 { let a = args()\n let e = env(\"PATH\")\n if a.len >= 1 && e.len > 0 { 1 } else { 0 } }",
+    );
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    let obj = out.object.expect("object expected");
+    assert!(
+        obj.windows(b"aura_rt_args".len())
+            .any(|w| w == b"aura_rt_args"),
+        "object must import aura_rt_args"
+    );
+    assert!(
+        obj.windows(b"aura_rt_env".len())
+            .any(|w| w == b"aura_rt_env"),
+        "object must import aura_rt_env"
+    );
+}
