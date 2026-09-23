@@ -97,6 +97,7 @@ impl InferCtx {
             Type::Result(ok, err) => {
                 Type::Result(Box::new(self.resolve(&ok)), Box::new(self.resolve(&err)))
             }
+            Type::Vec(t) => Type::Vec(Box::new(self.resolve(&t))),
             t => t,
         }
     }
@@ -147,6 +148,7 @@ impl InferCtx {
                 Box::new(self.finalize(&ok, unbound)),
                 Box::new(self.finalize(&err, unbound)),
             ),
+            Type::Vec(t) => Type::Vec(Box::new(self.finalize(&t, unbound))),
             t => t,
         }
     }
@@ -224,6 +226,7 @@ impl InferCtx {
                 self.unify(ao, bo)?;
                 self.unify(ae, be)
             }
+            (Type::Vec(a), Type::Vec(b)) => self.unify(a, b),
             _ => Err(UnifyError {
                 expected: a,
                 found: b,

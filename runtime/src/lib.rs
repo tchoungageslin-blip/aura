@@ -42,6 +42,8 @@ unsafe extern "C" {
     fn ExitProcess(code: u32) -> !;
     fn GetProcessHeap() -> *mut c_void;
     fn HeapAlloc(heap: *mut c_void, flags: u32, bytes: usize) -> *mut c_void;
+    fn HeapReAlloc(heap: *mut c_void, flags: u32, ptr: *mut c_void, bytes: usize)
+        -> *mut c_void;
     fn HeapFree(heap: *mut c_void, flags: u32, ptr: *mut c_void) -> i32;
     fn GetStdHandle(which: i32) -> *mut c_void;
     fn WriteFile(
@@ -416,4 +418,68 @@ pub unsafe extern "C" fn aura_str_concat(
         unsafe { memcpy(buf.add(l_len).cast(), r.cast(), r_len) };
     }
     buf
+}
+
+// ----- vec ---------------------------------------------------------------------
+
+/// Append `elem` (`esize` bytes at `elem`) to a `vec`'s buffer,
+/// growing it when `len == cap` (`cap` doubles from a floor of 4).
+/// Returns the — possibly reallocated — data pointer and writes the
+/// new capacity through `cap_out`; the caller stores both back and
+/// bumps `len`.
+///
+/// # Safety
+/// `elem` must be valid for `esize` bytes; `data` must be null or a
+/// process-heap buffer of `cap * esize` bytes; `cap_out` must be
+/// writable for a `usize`.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_vec_push(
+    data: *mut u8,
+    len: usize,
+    cap: usize,
+    elem: *const u8,
+    esize: usize,
+    cap_out: *mut usize,
+) -> *mut u8 {
+    let heap = unsafe { GetProcessHeap() };
+    let mut data = data;
+    let mut cap = cap;
+    if len >= cap {
+        cap = if cap == 0 { 4 } else { cap.saturating_mul(2) };
+        let bytes = cap.saturating_mul(esize);
+        data = if data.is_null() {
+            unsafe { HeapAlloc(heap, 0, bytes).cast() }
+        } else {
+            unsafe { HeapReAlloc(heap, 0, data.cast(), bytes).cast() }
+        };
+        if data.is_null() {
+            // OOM — no diagnostic channel; fail the process.
+            unsafe { ExitProcess(14) };
+        }
+    }
+    if esize != 0 {
+        unsafe { memcpy(data.add(len * esize).cast(), elem.cast(), esize) };
+    }
+    unsafe { *cap_out = cap };
+    data
+}
+
+/// Bounds-checked element address: `data + idx * esize`, or exit 101
+/// (Rust's panic code) when `idx >= len`. `vec_get`/`vec_set` share it.
+///
+/// # Safety
+/// `data` must be a buffer of at least `len * esize` bytes.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_vec_get(
+    data: *mut u8,
+    len: usize,
+    idx: usize,
+    esize: usize,
+) -> *mut u8 {
+    if idx >= len {
+        unsafe { ExitProcess(101) };
+    }
+    unsafe { data.add(idx * esize) }
 }

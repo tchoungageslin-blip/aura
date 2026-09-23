@@ -149,6 +149,9 @@ fn unsupported_ty(t: &Type, items: &FileItems) -> bool {
         // it (all fields representable; enums additionally need a tag).
         Type::Struct(i) | Type::Enum(i) => layout_of(items, *i, 8).is_none(),
         Type::Result(ok, err) => crate::layout::result_layout(items, ok, err, 8).is_none(),
+        // `vec<T>` storage is always the fixed `{ptr, len, cap}` triple —
+        // supported iff the element type itself has a representation.
+        Type::Vec(t) => unsupported_ty(t, items),
         Type::Int(_)
         | Type::Float(_)
         | Type::Bool

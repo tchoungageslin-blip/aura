@@ -47,6 +47,9 @@ pub fn scalar_size_align(ty: &Type, ptr_size: u32) -> Option<(u32, u32)> {
         },
         // `str` is a `{ ptr, len }` aggregate — two pointer words inline.
         Type::Str => (2 * ptr_size, ptr_size),
+        // `vec<T>` is a `{ ptr, len, cap }` aggregate — three pointer
+        // words inline (elements live in the heap buffer behind `ptr`).
+        Type::Vec(_) => (3 * ptr_size, ptr_size),
         // Aggregates-as-values are pointer-sized addresses; inline field
         // storage is handled by `layout_fields`'s aggregate recursion.
         Type::Pointer { .. }
@@ -169,6 +172,27 @@ pub fn str_layout(ptr_size: u32) -> Layout {
                 mutable: false,
                 pointee: Box::new(Type::Int(IntTy::U8)),
             },
+            Type::Int(IntTy::Usize),
+        ],
+        payload_off: 0,
+        variants: Vec::new(),
+    }
+}
+
+/// `vec<T>` is a `{ ptr: *mut u8, len: usize, cap: usize }` triple —
+/// three pointer-sized fields regardless of `T` (elements live in the
+/// heap buffer behind `ptr`, not inline).
+pub fn vec_layout(ptr_size: u32) -> Layout {
+    Layout {
+        size: 3 * ptr_size,
+        align: ptr_size,
+        offsets: vec![0, ptr_size, 2 * ptr_size],
+        field_tys: vec![
+            Type::Pointer {
+                mutable: true,
+                pointee: Box::new(Type::Int(IntTy::U8)),
+            },
+            Type::Int(IntTy::Usize),
             Type::Int(IntTy::Usize),
         ],
         payload_off: 0,

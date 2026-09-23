@@ -164,6 +164,22 @@ fn run_strings_fixture_returns_6() {
 }
 
 #[test]
+fn run_vec_fixture_returns_11() {
+    if runtime_lib().is_none() {
+        return;
+    }
+    let out = aura(&["run", fixture("vec.aura").to_str().unwrap()]);
+    // vec.aura: sum(10,99,30,40,50)=229, "ab"+"cd"="abcd", cap=8 → 11.
+    assert_eq!(
+        out.status.code(),
+        Some(11),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
 fn run_print_fixture_outputs_hello_and_exits_3() {
     if runtime_lib().is_none() {
         return;
@@ -304,7 +320,13 @@ fn differential_interp_matches_compiled() {
     if runtime_lib().is_none() {
         return;
     }
-    for name in ["hello.aura", "enum.aura", "result.aura", "strings.aura"] {
+    for name in [
+        "hello.aura",
+        "enum.aura",
+        "result.aura",
+        "strings.aura",
+        "vec.aura",
+    ] {
         let path = fixture(name);
         let path = path.to_str().unwrap();
         let compiled = aura(&["run", path]);

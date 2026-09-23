@@ -960,6 +960,13 @@ impl Lowerer<'_> {
                         "len" => Some(1),
                         _ => None,
                     },
+                    // `vec<T>` is `{ ptr, len, cap }` — a 3-field aggregate.
+                    Type::Vec(_) => match self.name(*field) {
+                        "ptr" => Some(0),
+                        "len" => Some(1),
+                        "cap" => Some(2),
+                        _ => None,
+                    },
                     _ => None,
                 };
                 base.proj.push(Proj::Field(idx?));

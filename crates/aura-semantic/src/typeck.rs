@@ -329,7 +329,7 @@ impl Checker<'_> {
             Some(Def::ExternFn(block, f)) => extern_fn_type(self.items, block, f),
             // Prelude builtins — `print`/`println`/`eprint`/`eprintln`
             // are `fn(str)`, `exit` is `fn(i64) -> !`.
-            Some(Def::Builtin(b)) => builtin_fn_type(b),
+            Some(Def::Builtin(b)) => builtin_fn_type(&mut self.infer, b),
             Some(Def::Variant(e, v)) => {
                 let payload = enum_variant_payload(self.items, e, v);
                 if payload.is_empty() {
@@ -421,6 +421,17 @@ impl Checker<'_> {
             BinOp::Eq | BinOp::Ne => {
                 let l = self.expr(lhs);
                 self.check(rhs, &l);
+                // `vec` has no `==` — byte equality is wrong for
+                // elements holding pointers (`vec<str>`), and an
+                // element-wise deep compare is not yet a builtin.
+                let lr = self.infer.resolve(&l);
+                if matches!(lr, Type::Vec(_)) {
+                    self.err(
+                        codes::SEM_TYPE_MISMATCH,
+                        format!("cannot compare `{}`", lr.display(self.items)),
+                        self.span(id),
+                    );
+                }
                 Type::Bool
             }
             BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
@@ -585,6 +596,25 @@ impl Checker<'_> {
                     self.err(
                         codes::SEM_NO_FIELD,
                         format!("no field `{fname}` on `str` — only `ptr` and `len`"),
+                        self.span(id),
+                    );
+                    Type::Error
+                }
+            };
+        }
+        // `vec<T>` exposes `{ ptr, len, cap }` — `ptr` is mutable since
+        // the buffer is owned heap storage.
+        if matches!(obj, Type::Vec(_)) {
+            return match fname {
+                "len" | "cap" => Type::Int(IntTy::Usize),
+                "ptr" => Type::Pointer {
+                    mutable: true,
+                    pointee: Box::new(Type::Int(IntTy::U8)),
+                },
+                _ => {
+                    self.err(
+                        codes::SEM_NO_FIELD,
+                        format!("no field `{fname}` on `vec<T>` — only `ptr`, `len` and `cap`"),
                         self.span(id),
                     );
                     Type::Error
@@ -1039,6 +1069,11 @@ impl Checker<'_> {
                         let e = self.lower_ast_ty(generic_args[1]);
                         Type::Result(Box::new(t), Box::new(e))
                     }
+                    // Built-in `vec<T>` annotation.
+                    None if text == "vec" && generic_args.len() == 1 => {
+                        let t = self.lower_ast_ty(generic_args[0]);
+                        Type::Vec(Box::new(t))
+                    }
                     None => match self.res.lookup(&text) {
                         Some(Def::Struct(i)) => Type::Struct(i),
                         Some(Def::Enum(i)) => Type::Enum(i),
@@ -1084,6 +1119,12 @@ pub fn lower_typename(items: &FileItems, tn: &TypeName) -> Type {
                     Box::new(lower_typename(items, e)),
                 );
             }
+            // Built-in `vec<T>` — same, one generic argument.
+            if name == "vec"
+                && let [t] = args.as_slice()
+            {
+                return Type::Vec(Box::new(lower_typename(items, t)));
+            }
             match items.find(name) {
                 Some(i) => match items.items.get(i as usize) {
                     Some(ItemSig::Struct { .. }) => Type::Struct(i),
@@ -1114,8 +1155,10 @@ fn fn_type(items: &FileItems, idx: u32) -> Type {
 }
 
 /// Signature of a prelude builtin — `print`-family is `fn(str)`,
-/// `exit` is `fn(i64) -> !`.
-fn builtin_fn_type(b: BuiltinFn) -> Type {
+/// `exit` is `fn(i64) -> !`, and the `vec` family is generic:
+/// instantiated per call site with a fresh inference var that usage
+/// (`vec_push(v, 3)`, a `vec<i64>` annotation, …) then pins down.
+fn builtin_fn_type(infer: &mut InferCtx, b: BuiltinFn) -> Type {
     match b {
         BuiltinFn::Print | BuiltinFn::Println | BuiltinFn::Eprint | BuiltinFn::Eprintln => {
             Type::Fn {
@@ -1127,6 +1170,33 @@ fn builtin_fn_type(b: BuiltinFn) -> Type {
             params: vec![Type::Int(IntTy::I64)],
             ret: Box::new(Type::Never),
         },
+        BuiltinFn::VecNew => {
+            let t = infer.new_var(VarKind::Any);
+            Type::Fn {
+                params: Vec::new(),
+                ret: Box::new(Type::Vec(Box::new(t))),
+            }
+        }
+        BuiltinFn::VecPush | BuiltinFn::VecSet => {
+            let t = infer.new_var(VarKind::Any);
+            let v = Type::Vec(Box::new(t.clone()));
+            let params = if matches!(b, BuiltinFn::VecPush) {
+                vec![v, t]
+            } else {
+                vec![v, Type::Int(IntTy::Usize), t]
+            };
+            Type::Fn {
+                params,
+                ret: Box::new(Type::Unit),
+            }
+        }
+        BuiltinFn::VecGet => {
+            let t = infer.new_var(VarKind::Any);
+            Type::Fn {
+                params: vec![Type::Vec(Box::new(t.clone())), Type::Int(IntTy::Usize)],
+                ret: Box::new(t),
+            }
+        }
     }
 }
 
@@ -1234,7 +1304,7 @@ fn extern_diags(
     let agg = |t: &Type| {
         matches!(
             t,
-            Type::Struct(_) | Type::Enum(_) | Type::Result(..) | Type::Str
+            Type::Struct(_) | Type::Enum(_) | Type::Result(..) | Type::Str | Type::Vec(_)
         )
     };
     fns.iter()

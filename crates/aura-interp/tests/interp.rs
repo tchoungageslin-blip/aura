@@ -236,3 +236,27 @@ fn str_add_concat() {
     let src = "fn main() -> i64 { let s = \"foo\" + \"bar\" + \"\"\n if s == \"foobar\" && s.len == 6 { 3 } else { 0 } }";
     assert_eq!(run(src), 3);
 }
+
+#[test]
+fn vec_push_get_set_len_cap() {
+    let src = "fn main() -> i64 { let v = vec_new()\n vec_push(v, 10)\n vec_push(v, 20)\n vec_set(v, 1, 99)\n if v.len == 2 && v.cap >= 4 { vec_get(v, 0) + vec_get(v, 1) } else { 0 } }";
+    assert_eq!(run(src), 109);
+}
+
+#[test]
+fn vec_of_str_and_growth() {
+    let src = "fn main() -> i64 { let vs = vec_new()\n vec_push(vs, \"ab\")\n vec_push(vs, \"cd\")\n let s = vec_get(vs, 0) + vec_get(vs, 1)\n let vi = vec_new()\n vec_push(vi, 1)\n vec_push(vi, 2)\n vec_push(vi, 3)\n vec_push(vi, 4)\n vec_push(vi, 5)\n if s == \"abcd\" && vi.cap == 8 { 7 } else { 0 } }";
+    assert_eq!(run(src), 7);
+}
+
+#[test]
+fn vec_in_struct_field_and_param() {
+    let src = "struct Bag { items: vec<i64> }\nfn sum(v: vec<i64>) -> i64 { let mut t = 0\n let mut i = 0\n while i < v.len { t = t + vec_get(v, i)\n i = i + 1 }\n t }\nfn main() -> i64 { let b = Bag { items: vec_new() }\n vec_push(b.items, 7)\n vec_push(b.items, 8)\n sum(b.items) }";
+    assert_eq!(run(src), 15);
+}
+
+#[test]
+fn vec_oob_is_error() {
+    let src = "fn main() -> i64 { let v = vec_new()\n vec_push(v, 1)\n vec_get(v, 5) }";
+    assert!(matches!(run_err(src), InterpError::Type(_)));
+}

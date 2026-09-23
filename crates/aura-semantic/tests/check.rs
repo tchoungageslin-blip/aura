@@ -485,3 +485,48 @@ fn str_sub_rejected() {
         codes::SEM_TYPE_MISMATCH,
     );
 }
+
+#[test]
+fn vec_infer_and_annotate_clean() {
+    let src = "fn main() -> i64 { let v = vec_new()\n vec_push(v, 3)\n let w: vec<i64> = vec_new()\n vec_push(w, vec_get(v, 0))\n vec_get(w, 0) }";
+    assert!(diags(src).is_empty(), "{:?}", diags(src));
+}
+
+#[test]
+fn vec_fields_clean() {
+    let src = "fn main() -> i64 { let v = vec_new()\n vec_push(v, 1)\n if v.len == 1 && v.cap >= 4 { 1 } else { 0 } }";
+    assert!(diags(src).is_empty(), "{:?}", diags(src));
+}
+
+#[test]
+fn vec_unbound_elem_cannot_infer() {
+    // `vec_new()` with no pinning usage — the elem var stays `?unknown`.
+    assert_has(
+        "fn main() -> i64 { let v = vec_new()\n 0 }",
+        codes::SEM_CANNOT_INFER,
+    );
+}
+
+#[test]
+fn vec_push_elem_mismatch() {
+    assert_has(
+        "fn main() -> i64 { let v: vec<str> = vec_new()\n vec_push(v, 5)\n 0 }",
+        codes::SEM_TYPE_MISMATCH,
+    );
+}
+
+#[test]
+fn vec_eq_rejected() {
+    assert_has(
+        "fn main() -> i64 { let a: vec<i64> = vec_new()\n let b: vec<i64> = vec_new()\n if a == b { 1 } else { 0 } }",
+        codes::SEM_TYPE_MISMATCH,
+    );
+}
+
+#[test]
+fn vec_extern_aggregate_rejected() {
+    assert_has(
+        "extern \"C\" { fn take(v: vec<i64>) -> i64 }\nfn main() -> i64 { 0 }",
+        codes::SEM_EXTERN_AGGREGATE,
+    );
+}

@@ -1,0 +1,31 @@
+// `vec<T>` — {ptr, len, cap} heap buffers end-to-end: generic builtins,
+// push/set/get, growth, `.len`/`.cap`, `vec<str>`, struct fields, fn params.
+fn sum(v: vec<i64>) -> i64 {
+    let mut t = 0
+    let mut i = 0
+    while i < v.len {
+        t = t + vec_get(v, i)
+        i = i + 1
+    }
+    t
+}
+
+struct Bag { items: vec<i64> }
+
+fn main() -> i64 {
+    let v: vec<i64> = vec_new()
+    vec_push(v, 10)
+    vec_push(v, 20)
+    vec_push(v, 30)
+    vec_push(v, 40)
+    vec_push(v, 50)
+    // cap: 4 -> 8
+
+    vec_set(v, 1, 99)
+    let words = vec_new()
+    vec_push(words, "ab")
+    vec_push(words, "cd")
+    let b = Bag { items: v }
+    let joined = vec_get(words, 0) + vec_get(words, 1)
+    if sum(b.items) == 229 && joined == "abcd" && b.items.cap == 8 { 11 } else { 0 }
+}

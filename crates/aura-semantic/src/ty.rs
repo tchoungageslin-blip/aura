@@ -111,6 +111,9 @@ pub enum Type {
     /// Built-in `Result<T, E>` — same `{tag, payload}` repr as enums;
     /// `Ok` is variant 0, `Err` variant 1.
     Result(Box<Type>, Box<Type>),
+    /// Built-in `vec<T>` — a `{ptr, len, cap}` heap-allocated growable
+    /// buffer; elements live in a flat byte array behind `ptr`.
+    Vec(Box<Type>),
     /// Inference variable — internal to `InferCtx`, never in outputs.
     Var(u32),
 }
@@ -150,6 +153,7 @@ impl Type {
             Type::Result(ok, err) => {
                 format!("Result<{}, {}>", ok.display(items), err.display(items))
             }
+            Type::Vec(t) => format!("vec<{}>", t.display(items)),
             Type::Var(v) => format!("?v{v}"),
         }
     }

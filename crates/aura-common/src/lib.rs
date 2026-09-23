@@ -29,6 +29,14 @@ pub enum BuiltinFn {
     Eprintln,
     /// `exit(code: i64) -> !` — terminate the process.
     Exit,
+    /// `vec_new<T>() -> vec<T>` — empty `{ptr: 0, len: 0, cap: 0}`.
+    VecNew,
+    /// `vec_push<T>(v: vec<T>, x: T)` — grow + append in place.
+    VecPush,
+    /// `vec_get<T>(v: vec<T>, i: usize) -> T` — bounds-checked load.
+    VecGet,
+    /// `vec_set<T>(v: vec<T>, i: usize, x: T)` — bounds-checked store.
+    VecSet,
 }
 
 impl BuiltinFn {
@@ -39,9 +47,13 @@ impl BuiltinFn {
         Self::Eprint,
         Self::Eprintln,
         Self::Exit,
+        Self::VecNew,
+        Self::VecPush,
+        Self::VecGet,
+        Self::VecSet,
     ];
 
-    /// Source-level name (`println`, `exit`, …).
+    /// Source-level name (`println`, `exit`, `vec_push`, …).
     pub fn name(self) -> &'static str {
         match self {
             Self::Print => "print",
@@ -49,10 +61,16 @@ impl BuiltinFn {
             Self::Eprint => "eprint",
             Self::Eprintln => "eprintln",
             Self::Exit => "exit",
+            Self::VecNew => "vec_new",
+            Self::VecPush => "vec_push",
+            Self::VecGet => "vec_get",
+            Self::VecSet => "vec_set",
         }
     }
 
-    /// Symbol imported from `aura_runtime`.
+    /// Symbol imported from `aura_runtime` — `""` for builtins emitted
+    /// inline by codegen (`vec_new` zeroes storage; `vec_set` is
+    /// `vec_get` + an element copy).
     pub fn runtime_symbol(self) -> &'static str {
         match self {
             Self::Print => "aura_rt_print",
@@ -60,13 +78,18 @@ impl BuiltinFn {
             Self::Eprint => "aura_rt_eprint",
             Self::Eprintln => "aura_rt_eprintln",
             Self::Exit => "aura_rt_exit",
+            Self::VecPush => "aura_vec_push",
+            Self::VecGet => "aura_vec_get",
+            Self::VecNew | Self::VecSet => "",
         }
     }
 
     /// Does the call take a `str` argument (passed as `{ptr, len}`)?
-    /// `false` means the single `i64` exit-code argument.
     pub fn takes_str(self) -> bool {
-        !matches!(self, Self::Exit)
+        matches!(
+            self,
+            Self::Print | Self::Println | Self::Eprint | Self::Eprintln
+        )
     }
 }
 

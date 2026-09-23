@@ -13,6 +13,7 @@
 //! Unsupported (→ [`InterpError::Unsupported`]): raw pointers, extern fns with
 //! no builtin, `use` items (no module loader yet).
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
@@ -30,6 +31,9 @@ pub enum Value {
     /// `Rc` shares the backing buffer across clones — `s.ptr` is stable
     /// for the same value, matching the compiled `{ptr, len}` repr.
     Str(Rc<str>),
+    /// `vec<T>` — `Rc<RefCell>` matches the compiled `{ptr, len, cap}`
+    /// buffer: `vec_push`/`vec_set` mutate through shared references.
+    Vec(Rc<RefCell<Vec<Value>>>),
     Unit,
     Struct {
         name: String,
@@ -217,6 +221,10 @@ enum Builtin {
     Eprint,
     Eprintln,
     Exit,
+    VecNew,
+    VecPush,
+    VecGet,
+    VecSet,
 }
 
 /// The interpreter: item tables plus a scope stack and fuel.
@@ -522,6 +530,20 @@ impl<'a> Interp<'a> {
                         ))),
                         _ => Err(InterpError::Type(format!("no field `{fname}` on `str`"))),
                     },
+                    // `vec<T>` exposes `{ ptr, len, cap }` — same opaque-
+                    // int treatment for `ptr` as `str`.
+                    Value::Vec(v) => match fname.as_str() {
+                        "len" => Ok(Value::Int(
+                            i128::try_from(v.borrow().len()).unwrap_or(i128::MAX),
+                        )),
+                        "cap" => Ok(Value::Int(
+                            i128::try_from(v.borrow().capacity()).unwrap_or(i128::MAX),
+                        )),
+                        "ptr" => Ok(Value::Int(i128::from(
+                            u64::try_from(v.borrow().as_ptr().addr()).unwrap_or(u64::MAX),
+                        ))),
+                        _ => Err(InterpError::Type(format!("no field `{fname}` on `vec<T>`"))),
+                    },
                     v => Err(InterpError::Type(format!("field access on {v:?}"))),
                 }
             }
@@ -793,6 +815,10 @@ impl Builtin {
             "eprint" => Some(Self::Eprint),
             "eprintln" => Some(Self::Eprintln),
             "exit" => Some(Self::Exit),
+            "vec_new" => Some(Self::VecNew),
+            "vec_push" => Some(Self::VecPush),
+            "vec_get" => Some(Self::VecGet),
+            "vec_set" => Some(Self::VecSet),
             _ => None,
         }
     }
@@ -832,6 +858,27 @@ impl Builtin {
             (Self::Exit, [Value::Int(c)]) => Err(InterpError::Escape(Escape::Exit(
                 i64::try_from(*c).unwrap_or(i64::MAX),
             ))),
+            (Self::VecNew, []) => Ok(Value::Vec(Rc::new(RefCell::new(Vec::new())))),
+            (Self::VecPush, [Value::Vec(v), x]) => {
+                v.borrow_mut().push(x.clone());
+                Ok(Value::Unit)
+            }
+            (Self::VecGet, [Value::Vec(v), Value::Int(i)]) => {
+                let i = usize::try_from(*i).unwrap_or(usize::MAX);
+                v.borrow()
+                    .get(i)
+                    .cloned()
+                    .ok_or_else(|| InterpError::Type("vec index out of bounds".into()))
+            }
+            (Self::VecSet, [Value::Vec(v), Value::Int(i), x]) => {
+                let i = usize::try_from(*i).unwrap_or(usize::MAX);
+                let mut b = v.borrow_mut();
+                let slot = b
+                    .get_mut(i)
+                    .ok_or_else(|| InterpError::Type("vec index out of bounds".into()))?;
+                *slot = x.clone();
+                Ok(Value::Unit)
+            }
             _ => Err(InterpError::Type("bad builtin args".into())),
         }
     }

@@ -222,11 +222,28 @@ fn declare_builtins(
 ) -> Result<FxHashMap<BuiltinFn, FuncId>, Vec<Diagnostic>> {
     let mut out = FxHashMap::default();
     for &b in BuiltinFn::ALL {
+        // Builtins with no runtime import (`vec_new` zeroes storage
+        // inline; `vec_set` is `vec_get` + an element copy).
+        if b.runtime_symbol().is_empty() {
+            continue;
+        }
         let mut sig = Signature::new(cc);
-        if b.takes_str() {
-            sig.params.extend([AbiParam::new(ptr); 2]); // str → {ptr, len}
-        } else {
-            sig.params.push(AbiParam::new(types::I64)); // exit code
+        match b {
+            BuiltinFn::Print | BuiltinFn::Println | BuiltinFn::Eprint | BuiltinFn::Eprintln => {
+                sig.params.extend([AbiParam::new(ptr); 2]); // str → {ptr, len}
+            }
+            BuiltinFn::Exit => sig.params.push(AbiParam::new(types::I64)),
+            // (data, len, cap, elem_ptr, elem_size, cap_out) -> data'
+            BuiltinFn::VecPush => {
+                sig.params.extend([AbiParam::new(ptr); 6]);
+                sig.returns.push(AbiParam::new(ptr));
+            }
+            // (data, len, idx, elem_size) -> elem ptr (bounds-checked)
+            BuiltinFn::VecGet => {
+                sig.params.extend([AbiParam::new(ptr); 4]);
+                sig.returns.push(AbiParam::new(ptr));
+            }
+            BuiltinFn::VecNew | BuiltinFn::VecSet => unreachable!(),
         }
         let id = module
             .declare_function(b.runtime_symbol(), Linkage::Import, &sig)
@@ -242,7 +259,7 @@ fn declare_builtins(
 fn is_aggregate(ty: &Type) -> bool {
     matches!(
         ty,
-        Type::Struct(_) | Type::Enum(_) | Type::Result(..) | Type::Str
+        Type::Struct(_) | Type::Enum(_) | Type::Result(..) | Type::Str | Type::Vec(_)
     )
 }
 
@@ -264,6 +281,7 @@ fn clif_ty(ty: &Type, ptr: cranelift_codegen::ir::Type) -> cranelift_codegen::ir
         | Type::Struct(_)
         | Type::Enum(_)
         | Type::Result(..)
+        | Type::Vec(_)
         | Type::Pointer { .. }
         | Type::Fn { .. }
         | Type::Tuple(_) => ptr,
@@ -450,6 +468,7 @@ impl FnGen<'_, '_> {
                 crate::layout::result_layout(self.items, ok, err, self.ptr.bytes())
             }
             Type::Str => Some(crate::layout::str_layout(self.ptr.bytes())),
+            Type::Vec(_) => Some(crate::layout::vec_layout(self.ptr.bytes())),
             _ => None,
         }
     }
@@ -651,7 +670,7 @@ impl FnGen<'_, '_> {
 
     fn call(&mut self, dest: &Place, callee: Callee, args: &[Operand]) {
         if let Callee::Builtin(b) = callee {
-            self.call_builtin(b, args);
+            self.call_builtin(dest, b, args);
             return;
         }
         let fid = match callee {
@@ -686,32 +705,207 @@ impl FnGen<'_, '_> {
         }
     }
 
-    /// Prelude builtin call — `print`-family takes a `str` operand and
-    /// flattens it to `{ptr, len}`; `exit` takes its `i64` code. All are
-    /// `void` at the ABI level (`exit` never returns anyway).
-    fn call_builtin(&mut self, b: BuiltinFn, args: &[Operand]) {
-        let Some(&fid) = self.table.builtins.get(&b) else {
+    /// Prelude builtin dispatch — `print`-family flattens `str` to
+    /// `{ptr, len}`; `exit` takes its `i64` code; the `vec` family is
+    /// byte-oriented (`elem_size` is a runtime arg, so no
+    /// monomorphization is needed).
+    fn call_builtin(&mut self, dest: &Place, b: BuiltinFn, args: &[Operand]) {
+        match b {
+            BuiltinFn::Print | BuiltinFn::Println | BuiltinFn::Eprint | BuiltinFn::Eprintln => {
+                let Some(op) = args.first() else { return };
+                let len_off = i32::try_from(self.ptr.bytes()).unwrap_or(i32::MAX);
+                let base = self.operand_addr(op);
+                let lp = self
+                    .b
+                    .ins()
+                    .load(self.ptr, MemFlagsData::trusted(), base, 0);
+                let ll = self
+                    .b
+                    .ins()
+                    .load(self.ptr, MemFlagsData::trusted(), base, len_off);
+                self.call_builtin_sym(b, &[lp, ll]);
+            }
+            BuiltinFn::Exit => {
+                let Some(op) = args.first() else { return };
+                let v = self.operand_val(op);
+                self.call_builtin_sym(b, &[v]);
+            }
+            BuiltinFn::VecNew => {
+                // `vec<T>` = `{ptr: 0, len: 0, cap: 0}` — an unallocated
+                // buffer; `vec_push` allocates on first use.
+                let base = self.place_addr(dest);
+                let z = self.b.ins().iconst(self.ptr, 0);
+                let ps = i32::try_from(self.ptr.bytes()).unwrap_or(i32::MAX);
+                for off in [0, ps, 2 * ps] {
+                    self.b.ins().store(MemFlagsData::trusted(), z, base, off);
+                }
+            }
+            BuiltinFn::VecPush => self.vec_push(args),
+            BuiltinFn::VecGet => self.vec_get_elem(dest, args),
+            BuiltinFn::VecSet => self.vec_set(args),
+        }
+    }
+
+    /// Call a declared `aura_*` builtin import, returning the result
+    /// value if the symbol returns one (`vec_push`/`vec_get` return the
+    /// data/element pointer; the print family and `exit` return void).
+    fn call_builtin_sym(&mut self, b: BuiltinFn, argvals: &[Value]) -> Option<Value> {
+        let &fid = self.table.builtins.get(&b)?;
+        let fref = self.module.declare_func_in_func(fid, self.b.func);
+        let inst = self.b.ins().call(fref, argvals);
+        self.b.inst_results(inst).first().copied()
+    }
+
+    /// Byte size of a `vec` element — aggregate layout size for
+    /// aggregates, scalar size otherwise.
+    fn elem_size(&self, ty: &Type) -> u32 {
+        if is_aggregate(ty) {
+            self.agg_layout(ty).map_or(self.ptr.bytes(), |(s, _)| s)
+        } else {
+            crate::layout::scalar_size_align(ty, self.ptr.bytes()).map_or(1, |(s, _)| s)
+        }
+    }
+
+    /// `vec<T>`'s element type from a `vec` operand.
+    fn vec_elem_ty(&self, v: &Operand) -> Option<Type> {
+        match self.operand_ty(v) {
+            Type::Vec(t) => Some(*t),
+            _ => None,
+        }
+    }
+
+    /// Address of an element operand's bytes — the operand's aggregate
+    /// address for aggregates; a stack temp holding the scalar value
+    /// otherwise.
+    fn elem_addr(&mut self, op: &Operand, ty: &Type) -> Value {
+        if is_aggregate(ty) {
+            return self.operand_addr(op);
+        }
+        let (size, align) =
+            crate::layout::scalar_size_align(ty, self.ptr.bytes()).unwrap_or((1, 1));
+        let slot = self.b.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            size,
+            u8::try_from(align.trailing_zeros()).unwrap_or(u8::MAX),
+        ));
+        let addr = self.b.ins().stack_addr(self.ptr, slot, 0);
+        let v = self.operand_val(op);
+        self.b.ins().store(MemFlagsData::trusted(), v, addr, 0);
+        addr
+    }
+
+    /// `vec_push(v, x)` — `aura_vec_push(data, len, cap, &x, esize)`
+    /// grows+appends in the runtime and returns the (possibly
+    /// reallocated) data pointer; `v.ptr`/`v.len` update in place.
+    fn vec_push(&mut self, args: &[Operand]) {
+        let [v, x] = args else { return };
+        let Some(ety) = self.vec_elem_ty(v) else {
             return;
         };
-        let fref = self.module.declare_func_in_func(fid, self.b.func);
-        let argvals: Vec<Value> = if b.takes_str() {
-            let Some(op) = args.first() else { return };
-            let base = self.operand_addr(op);
-            let len_off = i32::try_from(self.ptr.bytes()).unwrap_or(i32::MAX);
-            let lp = self
-                .b
-                .ins()
-                .load(self.ptr, MemFlagsData::trusted(), base, 0);
-            let ll = self
-                .b
-                .ins()
-                .load(self.ptr, MemFlagsData::trusted(), base, len_off);
-            vec![lp, ll]
-        } else {
-            let Some(op) = args.first() else { return };
-            vec![self.operand_val(op)]
+        let esize = self.elem_size(&ety);
+        let ps = i32::try_from(self.ptr.bytes()).unwrap_or(i32::MAX);
+        let va = self.operand_addr(v);
+        let data = self.b.ins().load(self.ptr, MemFlagsData::trusted(), va, 0);
+        let len = self.b.ins().load(self.ptr, MemFlagsData::trusted(), va, ps);
+        let cap = self
+            .b
+            .ins()
+            .load(self.ptr, MemFlagsData::trusted(), va, 2 * ps);
+        let xa = self.elem_addr(x, &ety);
+        let esz = self.b.ins().iconst(self.ptr, i64::from(esize));
+        // The runtime reports the post-push capacity through `cap_out`.
+        let cap_slot = self.b.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            self.ptr.bytes(),
+            u8::try_from(self.ptr.bytes().trailing_zeros()).unwrap_or(u8::MAX),
+        ));
+        let cap_out = self.b.ins().stack_addr(self.ptr, cap_slot, 0);
+        let Some(new_data) =
+            self.call_builtin_sym(BuiltinFn::VecPush, &[data, len, cap, xa, esz, cap_out])
+        else {
+            return;
         };
-        self.b.ins().call(fref, &argvals);
+        self.b.ins().store(MemFlagsData::trusted(), new_data, va, 0);
+        let new_cap = self
+            .b
+            .ins()
+            .load(self.ptr, MemFlagsData::trusted(), cap_out, 0);
+        self.b
+            .ins()
+            .store(MemFlagsData::trusted(), new_cap, va, 2 * ps);
+        let one = self.b.ins().iconst(self.ptr, 1);
+        let new_len = self.b.ins().iadd(len, one);
+        self.b.ins().store(MemFlagsData::trusted(), new_len, va, ps);
+    }
+
+    /// `aura_vec_get(data, len, idx, esize) -> elem_ptr` — bounds-checks
+    /// in the runtime (exit 101 on OOB) and returns the element address.
+    fn vec_elem_ptr(&mut self, v: &Operand, i: &Operand) -> Option<Value> {
+        let ps = i32::try_from(self.ptr.bytes()).unwrap_or(i32::MAX);
+        let ety = self.vec_elem_ty(v)?;
+        let esize = self.elem_size(&ety);
+        let va = self.operand_addr(v);
+        let data = self.b.ins().load(self.ptr, MemFlagsData::trusted(), va, 0);
+        let len = self.b.ins().load(self.ptr, MemFlagsData::trusted(), va, ps);
+        let iv = self.operand_val(i);
+        let esz = self.b.ins().iconst(self.ptr, i64::from(esize));
+        self.call_builtin_sym(BuiltinFn::VecGet, &[data, len, iv, esz])
+    }
+
+    /// `vec_get(v, i) -> T` — scalar elements load from the returned
+    /// pointer; aggregates copy `esize` bytes into the destination.
+    fn vec_get_elem(&mut self, dest: &Place, args: &[Operand]) {
+        let [v, i] = args else { return };
+        let Some(ety) = self.vec_elem_ty(v) else {
+            return;
+        };
+        let Some(ep) = self.vec_elem_ptr(v, i) else {
+            return;
+        };
+        if is_aggregate(&ety) {
+            let size = self.elem_size(&ety);
+            let align8 = u8::try_from(self.ptr.bytes()).unwrap_or(u8::MAX);
+            let da = self.place_addr(dest);
+            self.b.emit_small_memory_copy(
+                self.frontend_cfg,
+                da,
+                ep,
+                u64::from(size),
+                align8,
+                align8,
+                true,
+                MemFlagsData::trusted(),
+            );
+        } else {
+            let ct = clif_ty(&ety, self.ptr);
+            let x = self.b.ins().load(ct, MemFlagsData::trusted(), ep, 0);
+            self.store(dest, x);
+        }
+    }
+
+    /// `vec_set(v, i, x)` — bounds-checked element pointer, then an
+    /// `esize`-byte copy of `x`'s bytes into the slot.
+    fn vec_set(&mut self, args: &[Operand]) {
+        let [v, i, x] = args else { return };
+        let Some(ety) = self.vec_elem_ty(v) else {
+            return;
+        };
+        let Some(ep) = self.vec_elem_ptr(v, i) else {
+            return;
+        };
+        let xa = self.elem_addr(x, &ety);
+        let size = self.elem_size(&ety);
+        let align8 = u8::try_from(self.ptr.bytes()).unwrap_or(u8::MAX);
+        self.b.emit_small_memory_copy(
+            self.frontend_cfg,
+            ep,
+            xa,
+            u64::from(size),
+            align8,
+            align8,
+            true,
+            MemFlagsData::trusted(),
+        );
     }
 
     /// Declared type of the `ai`-th *clif* parameter of `callee` (accounting
@@ -818,7 +1012,7 @@ impl FnGen<'_, '_> {
         for proj in &p.proj {
             match proj {
                 aura_mir::Proj::Field(i) => {
-                    if matches!(ty, Type::Struct(_) | Type::Str) {
+                    if matches!(ty, Type::Struct(_) | Type::Str | Type::Vec(_)) {
                         ty = self
                             .layout_for(&ty)
                             .and_then(|l| l.field_tys.get(*i as usize).cloned())
@@ -867,7 +1061,7 @@ impl FnGen<'_, '_> {
         for proj in &p.proj {
             match proj {
                 aura_mir::Proj::Field(i) => {
-                    if matches!(ty, Type::Struct(_) | Type::Str)
+                    if matches!(ty, Type::Struct(_) | Type::Str | Type::Vec(_))
                         && let Some(l) = self.layout_for(&ty)
                     {
                         let off = *l.offsets.get(*i as usize).unwrap_or(&0);

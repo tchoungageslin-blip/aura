@@ -175,3 +175,22 @@ fn str_add_imports_aura_str_concat() {
         "object must import aura_str_concat"
     );
 }
+
+#[test]
+fn vec_ops_import_aura_vec_helpers() {
+    let out = compile(
+        "fn main() -> i64 { let v = vec_new()\n vec_push(v, 1)\n vec_set(v, 0, 2)\n vec_get(v, 0) }",
+    );
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    let obj = out.object.expect("object expected");
+    assert!(
+        obj.windows(b"aura_vec_push".len())
+            .any(|w| w == b"aura_vec_push"),
+        "object must import aura_vec_push"
+    );
+    assert!(
+        obj.windows(b"aura_vec_get".len())
+            .any(|w| w == b"aura_vec_get"),
+        "object must import aura_vec_get"
+    );
+}

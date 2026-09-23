@@ -54,6 +54,7 @@ fn ty_name(t: &aura_semantic::Type) -> String {
         Type::Str => "str".into(),
         Type::Struct(i) | Type::Enum(i) => format!("#{i}"),
         Type::Result(ok, err) => format!("Result<{}, {}>", ty_name(ok), ty_name(err)),
+        Type::Vec(t) => format!("vec<{}>", ty_name(t)),
         Type::Fn { .. } => "fn(..)".into(),
         Type::Tuple(_) => "(..)".into(),
         Type::Pointer { .. } => "*_".into(),
