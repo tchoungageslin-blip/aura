@@ -1,0 +1,56 @@
+{
+  "name": "aura-lang",
+  "displayName": "Aura Language",
+  "description": "Aura language support: syntax highlighting and LSP (diagnostics, hover, go-to-definition, symbols, formatting) via `aura lsp`",
+  "version": "0.1.0",
+  "publisher": "aura",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Formatters"
+  ],
+  "activationEvents": [
+    "onLanguage:aura"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "aura",
+        "aliases": ["Aura", "aura"],
+        "extensions": [".aura"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "aura",
+        "scopeName": "source.aura",
+        "path": "./syntaxes/aura.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Aura",
+      "properties": {
+        "aura.serverPath": {
+          "type": "string",
+          "default": "aura",
+          "description": "Path to the `aura` compiler binary (must support `aura lsp`)."
+        },
+        "aura.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Trace LSP messages in the Aura output channel."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}
