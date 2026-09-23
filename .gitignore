@@ -1,0 +1,17 @@
+/target
+**/*.rs.bk
+*.pdb
+
+# insta pending snapshots
+**/snapshots/*.snap.new
+
+# editor
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Aura build outputs
+*.obj
+*.o
+build/
+dist/

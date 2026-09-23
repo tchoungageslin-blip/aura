@@ -1,0 +1,16 @@
+[package]
+name = "aura-lexer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+aura-common.workspace = true
+lasso.workspace = true
+unicode-xid.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

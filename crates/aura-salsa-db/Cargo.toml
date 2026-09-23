@@ -1,0 +1,17 @@
+[package]
+name = "aura-salsa-db"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+aura-ast.workspace = true
+aura-common.workspace = true
+aura-lexer.workspace = true
+aura-parser.workspace = true
+indexmap.workspace = true
+lasso.workspace = true
+rustc-hash.workspace = true

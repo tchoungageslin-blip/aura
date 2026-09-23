@@ -1,0 +1,57 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0-alpha"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/aura-lang/aura"
+
+[workspace.dependencies]
+# Internal crates
+aura-common = { path = "crates/aura-common" }
+aura-lexer = { path = "crates/aura-lexer" }
+aura-ast = { path = "crates/aura-ast" }
+aura-parser = { path = "crates/aura-parser" }
+aura-salsa-db = { path = "crates/aura-salsa-db" }
+aura-semantic = { path = "crates/aura-semantic" }
+aura-hir = { path = "crates/aura-hir" }
+aura-mir = { path = "crates/aura-mir" }
+aura-codegen = { path = "crates/aura-codegen" }
+aura-linker = { path = "crates/aura-linker" }
+aura-runtime = { path = "crates/aura-runtime" }
+
+# External crates — versions resolved at build time, pinned via Cargo.lock
+lasso = "0.7.3"
+clap = { version = "4", features = ["derive"] }
+ariadne = "0.6"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+insta = "1"
+salsa = "0.28"
+indexmap = "2"
+rustc-hash = "2"
+unicode-xid = "0.2"
+tracing = "0.1"
+async-lsp = "0.2"
+arbitrary = { version = "1", features = ["derive"] }
+cranelift-codegen = "0.136"
+cranelift-frontend = "0.136"
+cranelift-module = "0.136"
+cranelift-object = "0.136"
+cranelift-native = "0.136"
+proptest = "1"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# pedantic noise for a compiler codebase — real hazards stay enabled
+must_use_candidate = "allow"
+
+[profile.release]
+lto = true
+codegen-units = 1

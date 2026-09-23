@@ -1,0 +1,19 @@
+---
+source: crates/aura-common/tests/render.rs
+expression: rendered
+---
+[E2001] Error: cannot find value `unknown` in this scope
+   ╭─[ hello.aura:2:12 ]
+   │
+ 2 │     let x = unknown
+   │            ───┬───  
+   │               ╰───── cannot find value `unknown` in this scope
+   │
+   ├─[ hello.aura:2:12 ]
+   │
+ 1 │ fn main() {
+   │         ──┬─  
+   │           ╰─── in this function
+   │ 
+   │ Note: variables must be declared with `let` before use
+───╯
