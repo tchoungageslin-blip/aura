@@ -15,6 +15,7 @@ aura-salsa-db.workspace = true
 indexmap.workspace = true
 lasso.workspace = true
 rustc-hash.workspace = true
+salsa.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

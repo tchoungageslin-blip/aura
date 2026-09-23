@@ -7,6 +7,10 @@ license.workspace = true
 [lints]
 workspace = true
 
+[[bin]]
+name = "aura"
+path = "src/main.rs"
+
 [dependencies]
 aura-codegen.workspace = true
 aura-common.workspace = true

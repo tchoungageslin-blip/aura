@@ -9,7 +9,7 @@ pub enum Severity {
 }
 
 /// A labeled sub-span attached to a diagnostic (e.g. "defined here").
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Label {
     pub span: Span,
     pub message: String,
@@ -17,7 +17,7 @@ pub struct Label {
 
 /// A rich compiler diagnostic with optional primary span, extra labels,
 /// and free-form notes.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Diagnostic {
     /// Namespaced error code, e.g. `E2001`. `None` for internal notes.
     pub code: Option<&'static str>,

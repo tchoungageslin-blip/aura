@@ -46,6 +46,10 @@ pub mod codes {
     pub const SEM_NOT_BOOL_CONDITION: &str = "E2105";
     pub const SEM_NON_EXHAUSTIVE_MATCH: &str = "E2106";
     pub const SEM_RETURN_TYPE: &str = "E2107";
+    pub const SEM_UNKNOWN_TYPE: &str = "E2108";
+    pub const SEM_UNKNOWN_VARIANT: &str = "E2109";
+    pub const SEM_MISSING_FIELDS: &str = "E2110";
+    pub const SEM_CANNOT_INFER: &str = "E2111";
 
     // Codegen (E3xxx)
     pub const CG_INTERNAL: &str = "E3001";

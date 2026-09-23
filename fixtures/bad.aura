@@ -1,0 +1,5 @@
+fn f() -> i64 {
+    let x = "hello"
+    x + 1
+}
+fn g() { missing_call(1, 2) }

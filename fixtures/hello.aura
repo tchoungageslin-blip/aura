@@ -1,0 +1,14 @@
+struct Vec2 { x: f64, y: f64 }
+
+fn length(v: Vec2) -> f64 {
+    let sq = v.x * v.x + v.y * v.y
+    sqrt(sq)
+}
+
+extern "C" { fn sqrt(x: f64) -> f64 }
+
+fn main() -> i64 {
+    let p = Vec2 { x: 3.0, y: 4.0 }
+    let len = length(p)
+    if len > 0.0 { return 1 } else { return 0 }
+}

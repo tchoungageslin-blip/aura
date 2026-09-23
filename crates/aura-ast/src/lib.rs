@@ -47,7 +47,7 @@ id!(BlockId);
 id!(TypeExprId);
 
 /// A node `T` paired with the `Span` it was parsed from.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Spanned<T> {
     pub node: T,
     pub span: Span,
@@ -90,8 +90,14 @@ impl<T> Arena<T> {
     }
 }
 
+impl<T: PartialEq> PartialEq for Arena<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.nodes == other.nodes
+    }
+}
+
 /// All arenas of one parsed file, bundled so functions can pass `&Ast`.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq)]
 pub struct Ast {
     pub exprs: Arena<Expr>,
     pub stmts: Arena<Stmt>,
