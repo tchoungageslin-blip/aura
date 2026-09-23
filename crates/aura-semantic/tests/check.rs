@@ -359,3 +359,68 @@ fn signature_edit_rechecks() {
     );
     assert!(db.execution_count("typeck_fn") >= 1);
 }
+
+// ----- str ---------------------------------------------------------------------
+
+#[test]
+fn str_fields_and_equality_clean() {
+    let src = "\
+fn main() -> i64 {
+    let s = \"hello\"
+    if s.len == 5 && s == \"hello\" && s != \"\" { 1 } else { 0 }
+}
+";
+    assert!(diags(src).is_empty(), "{:?}", diags(src));
+}
+
+#[test]
+fn str_param_return_clean() {
+    let src = "\
+fn id(s: str) -> str { s }
+fn main() -> i64 {
+    let x: str = \"ok\"
+    if id(x) == \"ok\" { 1 } else { 0 }
+}
+";
+    assert!(diags(src).is_empty(), "{:?}", diags(src));
+}
+
+#[test]
+fn str_unknown_field() {
+    assert_has(
+        "fn main() -> i64 { let s = \"x\"\n s.foo }",
+        codes::SEM_NO_FIELD,
+    );
+}
+
+#[test]
+fn str_order_compare_rejected() {
+    assert_has(
+        "fn main() -> i64 { if \"a\" < \"b\" { 1 } else { 0 } }",
+        codes::SEM_TYPE_MISMATCH,
+    );
+}
+
+#[test]
+fn extern_str_param_diagnosed() {
+    assert_has(
+        "extern \"C\" { fn take(s: str) -> i64 }\nfn main() -> i64 { take(\"x\") }",
+        codes::SEM_EXTERN_AGGREGATE,
+    );
+}
+
+#[test]
+fn extern_struct_param_diagnosed() {
+    assert_has(
+        "struct P { x: i64 }\nextern \"C\" { fn take(p: P) -> i64 }\nfn main() -> i64 { 0 }",
+        codes::SEM_EXTERN_AGGREGATE,
+    );
+}
+
+#[test]
+fn extern_str_return_diagnosed() {
+    assert_has(
+        "extern \"C\" { fn give() -> str }\nfn main() -> i64 { 0 }",
+        codes::SEM_EXTERN_AGGREGATE,
+    );
+}

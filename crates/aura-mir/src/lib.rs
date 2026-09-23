@@ -169,6 +169,10 @@ pub enum Rvalue {
         /// `(payload field index, operand)` pairs.
         fields: Vec<(u32, Operand)>,
     },
+    /// `"text"` — writes `{ ptr, len }` into the destination's storage;
+    /// `ptr` addresses a read-only image of `text`, `len` is its byte
+    /// length. `str` is a 2-word aggregate.
+    StrLit(String),
     /// Read the `i32` discriminant at offset 0 of an enum place.
     Discriminant(Place),
 }

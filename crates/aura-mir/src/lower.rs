@@ -370,9 +370,11 @@ impl Lowerer<'_> {
                 },
                 Literal::Bool(b) => Operand::Const(Const::Bool(*b)),
                 Literal::Unit => Operand::Const(Const::Unit),
-                Literal::Str(_) => {
-                    self.unsupported("string literals", self.span(id));
-                    Operand::Const(Const::Unit)
+                Literal::Str(s) => {
+                    let t = self.temp(Type::Str);
+                    let text = self.name(*s).to_owned();
+                    self.assign(Place::local(t), Rvalue::StrLit(text));
+                    Operand::Place(Place::local(t))
                 }
             },
             Expr::Ident(name) => self.ident(*name, id),
@@ -768,11 +770,21 @@ impl Lowerer<'_> {
                 }
             }
             Pattern::Literal(l) => {
-                let c = Self::lit_const(l, scr_ty);
+                // String patterns compare against a `strlit` temp — `str`
+                // has no `Const` form.
+                let op = match l {
+                    Literal::Str(s) => {
+                        let t = self.temp(Type::Str);
+                        let text = self.name(*s).to_owned();
+                        self.assign(Place::local(t), Rvalue::StrLit(text));
+                        Operand::Place(Place::local(t))
+                    }
+                    l => Operand::Const(Self::lit_const(l, scr_ty)),
+                };
                 let eq = self.temp(Type::Bool);
                 self.assign(
                     Place::local(eq),
-                    Rvalue::Binary(BinOp::Eq, Operand::Place(scr.clone()), Operand::Const(c)),
+                    Rvalue::Binary(BinOp::Eq, Operand::Place(scr.clone()), op),
                 );
                 Some(Operand::Place(Place::local(eq)))
             }
@@ -941,6 +953,12 @@ impl Lowerer<'_> {
                             _ => None,
                         }
                     }
+                    // `str` is `{ ptr, len }` — a 2-field aggregate.
+                    Type::Str => match self.name(*field) {
+                        "ptr" => Some(0),
+                        "len" => Some(1),
+                        _ => None,
+                    },
                     _ => None,
                 };
                 base.proj.push(Proj::Field(idx?));

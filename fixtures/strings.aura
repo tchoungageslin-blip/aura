@@ -1,0 +1,24 @@
+// `str` — {ptr, len} aggregates end-to-end: literals, `.len`, `==`,
+// params/returns, struct fields, match patterns, escapes, reassignment.
+fn shout(s: str) -> str {
+    s
+}
+
+struct Label { text: str, wide: i64 }
+
+fn main() -> i64 {
+    let greeting = "hello"
+    let same = "hello"
+    let empty = ""
+    let l = Label { text: "ab\ncd", wide: 5 }
+    let mut echoed = ""
+    echoed = shout(l.text)
+    let tag = match greeting {
+        "hello" => 1,
+        _ => 0,
+    }
+    if greeting == same && greeting != "bye" && empty.len == 0 && echoed.len == 5 && l.wide == 5 {
+        tag + 5
+        // = 6
+    } else { 0 }
+}

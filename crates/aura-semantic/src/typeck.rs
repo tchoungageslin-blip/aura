@@ -21,7 +21,7 @@ use lasso::Spur;
 
 use crate::infer::{InferCtx, VarKind};
 use crate::resolve::{Def, Resolution, resolved_file, resolved_project};
-use crate::ty::{self, Type};
+use crate::ty::{self, IntTy, Type};
 
 /// Result of checking one function body.
 #[derive(Debug, Clone, PartialEq)]
@@ -424,7 +424,7 @@ impl Checker<'_> {
                 let l = self.expr(lhs);
                 self.check(rhs, &l);
                 let l = self.infer.resolve(&l);
-                if !(self.is_numeric(&l) || matches!(l, Type::Str | Type::Var(_) | Type::Error)) {
+                if !(self.is_numeric(&l) || matches!(l, Type::Var(_) | Type::Error)) {
                     self.err(
                         codes::SEM_TYPE_MISMATCH,
                         format!("cannot compare `{}`", l.display(self.items)),
@@ -564,6 +564,26 @@ impl Checker<'_> {
     fn field(&mut self, object: ExprId, field: Spur, id: ExprId) -> Type {
         let raw = self.expr(object);
         let obj = self.infer.resolve(&raw);
+        let fname = self.name(field);
+        // `str` exposes its `{ ptr, len }` representation — read-only
+        // fields used by std wrappers (`s.ptr`, `s.len`).
+        if matches!(obj, Type::Str) {
+            return match fname {
+                "len" => Type::Int(IntTy::Usize),
+                "ptr" => Type::Pointer {
+                    mutable: false,
+                    pointee: Box::new(Type::Int(IntTy::U8)),
+                },
+                _ => {
+                    self.err(
+                        codes::SEM_NO_FIELD,
+                        format!("no field `{fname}` on `str` — only `ptr` and `len`"),
+                        self.span(id),
+                    );
+                    Type::Error
+                }
+            };
+        }
         let Type::Struct(idx) = obj else {
             if !matches!(obj, Type::Error) {
                 self.err(
@@ -602,7 +622,6 @@ impl Checker<'_> {
         else_branch: Option<ExprId>,
         id: ExprId,
     ) -> Type {
-        self.check(cond, &Type::Bool);
         self.check_bool(cond);
         let then_ty = self.block(then_block);
         match else_branch {
@@ -1154,8 +1173,20 @@ pub fn check_file(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
         );
     }
 
-    // Type-check every fn body.
+    // Type-check every fn body + extern signatures.
     for (i, sig) in items.iter() {
+        if let ItemSig::ExternBlock { fns, .. } = sig {
+            let ast_fns = match parsed.items.get(i as usize) {
+                Some(aura_ast::Item::ExternBlock { fns, .. }) => Some(fns.as_slice()),
+                _ => None,
+            };
+            diags.extend(extern_diags(items, fns, |f| {
+                ast_fns
+                    .and_then(|fs| fs.get(f))
+                    .map_or_else(|| parsed.items[i as usize].span(), |f| f.span)
+            }));
+            continue;
+        }
         if !matches!(sig, ItemSig::Fn { .. }) {
             continue;
         }
@@ -1166,6 +1197,44 @@ pub fn check_file(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
 
     diags.sort_by_key(|d| d.span.map_or(0, |s| s.start));
     diags
+}
+
+/// `extern` fns cannot take or return aggregate types — the host C ABI
+/// for by-value aggregates is not implemented. Pass scalars (`s.ptr`,
+/// `s.len`) or pointers instead.
+fn extern_diags(
+    items: &FileItems,
+    fns: &[aura_salsa_db::ExternFnSig],
+    span_of: impl Fn(usize) -> Span,
+) -> Vec<Diagnostic> {
+    let agg = |t: &Type| {
+        matches!(
+            t,
+            Type::Struct(_) | Type::Enum(_) | Type::Result(..) | Type::Str
+        )
+    };
+    fns.iter()
+        .enumerate()
+        .filter(|(_, sig)| {
+            sig.params
+                .iter()
+                .any(|p| agg(&lower_typename(items, &p.ty)))
+                || sig
+                    .ret
+                    .as_ref()
+                    .is_some_and(|t| agg(&lower_typename(items, t)))
+        })
+        .map(|(f, sig)| {
+            Diagnostic::error(
+                codes::SEM_EXTERN_AGGREGATE,
+                format!(
+                    "extern fn `{}` uses an aggregate type in its signature",
+                    sig.name
+                ),
+                span_of(f),
+            )
+        })
+        .collect()
 }
 
 /// Whole-project check — the multi-file counterpart of [`check_file`].
@@ -1204,6 +1273,21 @@ pub fn check_project(db: &dyn Db, project: Project) -> Vec<Diagnostic> {
     }
 
     for (g, sig) in pi.merged.iter() {
+        if let ItemSig::ExternBlock { fns, .. } = sig {
+            diags.extend(extern_diags(&pi.merged, fns, |f| {
+                pi.locate(g)
+                    .and_then(|(file, local)| {
+                        match aura_salsa_db::parsed(db, file).items.get(local as usize) {
+                            Some(aura_ast::Item::ExternBlock { fns, .. }) => {
+                                fns.get(f).map(|f| f.span)
+                            }
+                            item => item.map(aura_ast::Item::span),
+                        }
+                    })
+                    .unwrap_or_else(|| Span::point(project.files(db)[0].file_id(db), 0))
+            }));
+            continue;
+        }
         if !matches!(sig, ItemSig::Fn { .. }) {
             continue;
         }

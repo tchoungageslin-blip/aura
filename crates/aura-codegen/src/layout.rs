@@ -6,7 +6,7 @@
 //! structs cross an `extern` boundary.
 
 use aura_salsa_db::{FileItems, ItemSig, TypeName};
-use aura_semantic::{Type, lower_typename};
+use aura_semantic::{IntTy, Type, lower_typename};
 
 /// Byte layout of one aggregate type (struct or enum).
 ///
@@ -45,9 +45,12 @@ pub fn scalar_size_align(ty: &Type, ptr_size: u32) -> Option<(u32, u32)> {
             aura_semantic::FloatTy::F32 => (4, 4),
             aura_semantic::FloatTy::F64 => (8, 8),
         },
+        // `str` is a `{ ptr, len }` aggregate — two pointer words inline.
+        Type::Str => (2 * ptr_size, ptr_size),
+        // Aggregates-as-values are pointer-sized addresses; inline field
+        // storage is handled by `layout_fields`'s aggregate recursion.
         Type::Pointer { .. }
         | Type::Fn { .. }
-        | Type::Str
         | Type::Struct(_)
         | Type::Enum(_)
         | Type::Result(..) => (ptr_size, ptr_size),
@@ -152,6 +155,25 @@ pub fn result_layout(items: &FileItems, ok: &Type, err: &Type, ptr_size: u32) ->
         payload_off,
         variants: layouts,
     })
+}
+
+/// Layout of the built-in `str` — `{ ptr: *u8, len: usize }`, two
+/// pointer-sized words. Matches the fields typeck exposes via `s.ptr`/`s.len`.
+pub fn str_layout(ptr_size: u32) -> Layout {
+    Layout {
+        size: 2 * ptr_size,
+        align: ptr_size,
+        offsets: vec![0, ptr_size],
+        field_tys: vec![
+            Type::Pointer {
+                mutable: false,
+                pointee: Box::new(Type::Int(IntTy::U8)),
+            },
+            Type::Int(IntTy::Usize),
+        ],
+        payload_off: 0,
+        variants: Vec::new(),
+    }
 }
 
 /// Shared C-layout math: field offsets at natural alignment, total size

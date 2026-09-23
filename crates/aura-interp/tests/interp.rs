@@ -169,3 +169,49 @@ fn diagnostics_on_bad_source() {
     let r = run_source("fn main() -> i64 {");
     assert!(matches!(r, Err(RunError::Diagnostics(_))));
 }
+
+#[test]
+fn str_len_and_equality() {
+    assert_eq!(
+        run(
+            "fn main() -> i64 { let s = \"hello\"\n if s.len == 5 && s == \"hello\" { 7 } else { 0 } }"
+        ),
+        7
+    );
+}
+
+#[test]
+fn str_param_and_return() {
+    assert_eq!(
+        run(
+            "fn id(s: str) -> str { s }\nfn main() -> i64 { if id(\"ok\") == \"ok\" { 3 } else { 0 } }"
+        ),
+        3
+    );
+}
+
+#[test]
+fn str_field_in_struct() {
+    assert_eq!(
+        run(
+            "struct P { s: str }\nfn main() -> i64 { let p = P { s: \"ab\" }\n if p.s == \"ab\" { 4 } else { 0 } }"
+        ),
+        4
+    );
+}
+
+#[test]
+fn str_match_pattern() {
+    assert_eq!(
+        run("fn main() -> i64 { match \"hi\" { \"hi\" => 1, _ => 0 } }"),
+        1
+    );
+}
+
+#[test]
+fn str_ptr_is_opaque_int() {
+    assert_eq!(
+        run("fn main() -> i64 { let s = \"x\"\n if s.ptr == s.ptr { 2 } else { 0 } }"),
+        2
+    );
+}

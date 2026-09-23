@@ -17,14 +17,15 @@ use aura_mir::{Callee, Const, MirBody, MirStmt, MirTerm, Operand, Place, Rvalue}
 use aura_salsa_db::{FileItems, ItemSig};
 use aura_semantic::{FloatTy, Type};
 use cranelift_codegen::ir::{
-    AbiParam, InstBuilder, MemFlagsData, StackSlotData, StackSlotKind, TrapCode, Value,
+    AbiParam, GlobalValue, InstBuilder, MemFlagsData, Signature, StackSlotData, StackSlotKind,
+    TrapCode, Value,
     condcodes::{FloatCC, IntCC},
     types,
 };
 use cranelift_codegen::isa::TargetFrontendConfig;
 use cranelift_codegen::settings;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
-use cranelift_module::{FuncId, Linkage, Module, default_libcall_names};
+use cranelift_module::{DataDescription, FuncId, Linkage, Module, default_libcall_names};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 use rustc_hash::FxHashMap;
 
@@ -42,6 +43,8 @@ struct FnTable {
     fns: FxHashMap<u32, FuncId>,
     /// `FuncId` per `(extern-block idx, fn idx)` for extern fns.
     externs: FxHashMap<(u32, u32), FuncId>,
+    /// Runtime `aura_str_eq` helper — imported unconditionally.
+    str_eq: FuncId,
 }
 
 /// Compile every function body into one object module and emit bytes.
@@ -68,9 +71,11 @@ pub fn emit_object(items: &FileItems, mirs: &[(u32, MirBody)]) -> Result<Emitted
     let mut module = ObjectModule::new(builder);
 
     // Pass 1 — declare every callable symbol before bodies reference them.
+    let str_eq = declare_str_eq(&mut module, ptr, call_conv)?;
     let mut table = FnTable {
         fns: FxHashMap::default(),
         externs: FxHashMap::default(),
+        str_eq,
     };
     for (i, sig) in items.iter() {
         match sig {
@@ -163,11 +168,30 @@ fn internal(msg: &str) -> Vec<Diagnostic> {
     )]
 }
 
+/// Import `aura_str_eq(l_ptr, l_len, r_ptr, r_len) -> i32`. Declared
+/// unconditionally — the unreferenced import is dropped from the object
+/// when no `str` comparison is emitted.
+fn declare_str_eq(
+    module: &mut ObjectModule,
+    ptr: cranelift_codegen::ir::Type,
+    cc: cranelift_codegen::isa::CallConv,
+) -> Result<FuncId, Vec<Diagnostic>> {
+    let mut sig = Signature::new(cc);
+    sig.params.extend([AbiParam::new(ptr); 4]);
+    sig.returns.push(AbiParam::new(types::I32));
+    module
+        .declare_function("aura_str_eq", Linkage::Import, &sig)
+        .map_err(|e| internal(&format!("declare aura_str_eq: {e}")))
+}
+
 // ----- signatures --------------------------------------------------------------
 
 /// Is `ty` passed/returned by hidden pointer (internal aggregate ABI)?
 fn is_aggregate(ty: &Type) -> bool {
-    matches!(ty, Type::Struct(_) | Type::Enum(_) | Type::Result(..))
+    matches!(
+        ty,
+        Type::Struct(_) | Type::Enum(_) | Type::Result(..) | Type::Str
+    )
 }
 
 /// clif representation of `ty`: scalars get their natural type,
@@ -364,7 +388,7 @@ impl FnGen<'_, '_> {
     }
 
     /// [`Layout`] of any aggregate type — declared items via the
-    /// precomputed table, built-in `Result` computed on the fly.
+    /// precomputed table, built-in `Result`/`str` computed on the fly.
     fn layout_for(&self, ty: &Type) -> Option<Layout> {
         match ty {
             Type::Struct(idx) | Type::Enum(idx) => {
@@ -373,6 +397,7 @@ impl FnGen<'_, '_> {
             Type::Result(ok, err) => {
                 crate::layout::result_layout(self.items, ok, err, self.ptr.bytes())
             }
+            Type::Str => Some(crate::layout::str_layout(self.ptr.bytes())),
             _ => None,
         }
     }
@@ -465,6 +490,22 @@ impl FnGen<'_, '_> {
                     }
                 }
             }
+            Rvalue::StrLit(text) => {
+                // Bytes go into anonymous read-only data; the `str` place
+                // gets `{ ptr: bytes, len }` stored through its fields.
+                let data = self.str_data(text);
+                let addr = self.b.ins().symbol_value(self.ptr, data);
+                let mut p = place.clone();
+                p.proj.push(aura_mir::Proj::Field(0));
+                self.store(&p, addr);
+                let mut p = place.clone();
+                p.proj.push(aura_mir::Proj::Field(1));
+                let len = self
+                    .b
+                    .ins()
+                    .iconst(self.ptr, i64::try_from(text.len()).unwrap_or(i64::MAX));
+                self.store(&p, len);
+            }
             Rvalue::Discriminant(p) => {
                 let addr = self.place_addr(p);
                 let v = self
@@ -474,6 +515,49 @@ impl FnGen<'_, '_> {
                 self.store(place, v);
             }
         }
+    }
+
+    /// Emit `text` as anonymous read-only data and return its
+    /// function-local [`GlobalValue`].
+    fn str_data(&mut self, text: &str) -> GlobalValue {
+        let id = self
+            .module
+            .declare_anonymous_data(false, false)
+            .expect("anonymous data declaration cannot fail");
+        let mut desc = DataDescription::new();
+        desc.define(text.as_bytes().to_vec().into_boxed_slice());
+        self.module
+            .define_data(id, &desc)
+            .expect("anonymous data definition cannot fail");
+        self.module.declare_data_in_func(id, self.b.func)
+    }
+
+    /// `str ==`/`!=` via `aura_str_eq(l.ptr, l.len, r.ptr, r.len)`.
+    /// `l`/`r` are the operands' aggregate base addresses.
+    fn str_eq(&mut self, op: BinOp, l: Value, r: Value) -> Value {
+        let len_off = i32::try_from(self.ptr.bytes()).unwrap_or(i32::MAX);
+        let lp = self.b.ins().load(self.ptr, MemFlagsData::trusted(), l, 0);
+        let ll = self
+            .b
+            .ins()
+            .load(self.ptr, MemFlagsData::trusted(), l, len_off);
+        let rp = self.b.ins().load(self.ptr, MemFlagsData::trusted(), r, 0);
+        let rl = self
+            .b
+            .ins()
+            .load(self.ptr, MemFlagsData::trusted(), r, len_off);
+        let fref = self
+            .module
+            .declare_func_in_func(self.table.str_eq, self.b.func);
+        let call = self.b.ins().call(fref, &[lp, ll, rp, rl]);
+        let eq = self.b.inst_results(call)[0];
+        let zero = self.b.ins().iconst(types::I32, 0);
+        let cc = if op == BinOp::Ne {
+            IntCC::Equal
+        } else {
+            IntCC::NotEqual
+        };
+        self.b.ins().icmp(cc, eq, zero)
     }
 
     fn call(&mut self, dest: &Place, callee: Callee, args: &[Operand]) {
@@ -532,6 +616,9 @@ impl FnGen<'_, '_> {
 
     fn binop(&mut self, op: BinOp, ty: &Type, lhs: Value, rhs: Value) -> Value {
         match ty {
+            // `str` equality — byte-wise via the runtime helper; `lhs`/`rhs`
+            // are the operands' aggregate addresses.
+            Type::Str => self.str_eq(op, lhs, rhs),
             Type::Float(_) => match op {
                 BinOp::Add => self.b.ins().fadd(lhs, rhs),
                 BinOp::Sub => self.b.ins().fsub(lhs, rhs),
@@ -608,11 +695,9 @@ impl FnGen<'_, '_> {
         for proj in &p.proj {
             match proj {
                 aura_mir::Proj::Field(i) => {
-                    if let Type::Struct(idx) = ty {
+                    if matches!(ty, Type::Struct(_) | Type::Str) {
                         ty = self
-                            .layouts
-                            .get(idx as usize)
-                            .and_then(|l| l.as_ref())
+                            .layout_for(&ty)
                             .and_then(|l| l.field_tys.get(*i as usize).cloned())
                             .unwrap_or(Type::Error);
                     } else {
@@ -659,8 +744,8 @@ impl FnGen<'_, '_> {
         for proj in &p.proj {
             match proj {
                 aura_mir::Proj::Field(i) => {
-                    if let Type::Struct(idx) = ty
-                        && let Some(l) = self.layouts.get(idx as usize).and_then(|l| l.as_ref())
+                    if matches!(ty, Type::Struct(_) | Type::Str)
+                        && let Some(l) = self.layout_for(&ty)
                     {
                         let off = *l.offsets.get(*i as usize).unwrap_or(&0);
                         if off != 0 {

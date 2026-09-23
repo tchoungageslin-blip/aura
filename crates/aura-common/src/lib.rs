@@ -50,6 +50,7 @@ pub mod codes {
     pub const SEM_UNKNOWN_VARIANT: &str = "E2109";
     pub const SEM_MISSING_FIELDS: &str = "E2110";
     pub const SEM_CANNOT_INFER: &str = "E2111";
+    pub const SEM_EXTERN_AGGREGATE: &str = "E2112";
 
     // Codegen (E3xxx)
     pub const CG_INTERNAL: &str = "E3001";

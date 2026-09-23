@@ -14,7 +14,8 @@
 //! early-cutoff boundary.
 
 use aura_ast::{
-    Ast, Block, BlockId, Expr, ExprId, Item, MatchArm, Pattern, Stmt, StmtId, TypeExpr, TypeExprId,
+    Ast, Block, BlockId, Expr, ExprId, Item, Literal, MatchArm, Pattern, Stmt, StmtId, TypeExpr,
+    TypeExprId,
 };
 use lasso::Spur;
 use rustc_hash::FxHashMap;
@@ -134,7 +135,10 @@ impl Cloner<'_> {
         let span = self.src.expr_span(id);
         let expr = match self.src.expr(id) {
             Expr::Error => Expr::Error,
-            Expr::Literal(l) => Expr::Literal(*l),
+            Expr::Literal(l) => Expr::Literal(match l {
+                Literal::Str(s) => Literal::Str(self.intern(*s)),
+                l => *l,
+            }),
             Expr::Ident(n) => Expr::Ident(self.intern(*n)),
             Expr::Binary { op, lhs, rhs } => Expr::Binary {
                 op: *op,
@@ -198,7 +202,10 @@ impl Cloner<'_> {
         match p {
             Pattern::Wildcard => Pattern::Wildcard,
             Pattern::Ident(n) => Pattern::Ident(self.intern(*n)),
-            Pattern::Literal(l) => Pattern::Literal(*l),
+            Pattern::Literal(l) => Pattern::Literal(match l {
+                Literal::Str(s) => Literal::Str(self.intern(*s)),
+                l => *l,
+            }),
             Pattern::Variant { name, args } => Pattern::Variant {
                 name: self.intern(*name),
                 args: args.iter().map(|a| self.pattern(a)).collect(),

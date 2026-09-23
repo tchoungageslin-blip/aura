@@ -120,13 +120,53 @@ fn struct_literal_and_field_access() {
 }
 
 #[test]
-fn string_literal_is_unsupported_diag() {
+fn str_literal_lowers_to_strlit_temp() {
     let m = mir_of("fn f() { let s = \"hi\" }", "f");
+    assert!(m.diagnostics.is_empty(), "{:?}", m.diagnostics);
+    let lit = m
+        .blocks
+        .iter()
+        .flat_map(|b| &b.stmts)
+        .find_map(|s| match s {
+            aura_mir::MirStmt::Assign(p, aura_mir::Rvalue::StrLit(t)) => Some((p, t)),
+            _ => None,
+        });
+    let (p, text) = lit.expect("expected StrLit");
+    assert_eq!(text, "hi");
     assert!(
-        m.diagnostics
-            .iter()
-            .any(|d| d.code == Some(aura_common::codes::CG_UNSUPPORTED))
+        matches!(m.locals[p.local as usize].ty, aura_semantic::Type::Str),
+        "strlit dest must be `str`: {:?}",
+        dump(&m)
     );
+}
+
+#[test]
+fn str_len_lowers_to_field_one() {
+    let m = mir_of("fn f() -> usize { let s = \"hi\"\n s.len }", "f");
+    assert!(m.diagnostics.is_empty(), "{:?}", m.diagnostics);
+    let has_len_proj = m.blocks.iter().any(|b| {
+        b.stmts.iter().any(|s| {
+            matches!(
+                s,
+                aura_mir::MirStmt::Assign(_, aura_mir::Rvalue::Use(Operand::Place(p)))
+                    if p.proj == [aura_mir::Proj::Field(1)]
+            )
+        })
+    });
+    assert!(has_len_proj, "expected `.1` projection in {:?}", dump(&m));
+}
+
+#[test]
+fn str_match_pattern_uses_strlit() {
+    let m = mir_of(
+        "fn f(s: str) -> i64 { match s { \"a\" => 1, _ => 0 } }",
+        "f",
+    );
+    assert!(m.diagnostics.is_empty(), "{:?}", m.diagnostics);
+    let lit = m.blocks.iter().flat_map(|b| &b.stmts).any(
+        |s| matches!(s, aura_mir::MirStmt::Assign(_, aura_mir::Rvalue::StrLit(t)) if t == "a"),
+    );
+    assert!(lit, "expected pattern strlit in {:?}", dump(&m));
 }
 
 #[test]

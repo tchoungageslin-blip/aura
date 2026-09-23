@@ -143,7 +143,7 @@ fn finish_compile(
 
 fn unsupported_ty(t: &Type, items: &FileItems) -> bool {
     match t {
-        Type::Int(IntTy::I128 | IntTy::U128) | Type::Str | Type::Tuple(_) | Type::Fn { .. } => true,
+        Type::Int(IntTy::I128 | IntTy::U128) | Type::Tuple(_) | Type::Fn { .. } => true,
         Type::Pointer { pointee, .. } => unsupported_ty(pointee, items),
         // An aggregate is supported iff a C-compatible layout exists for
         // it (all fields representable; enums additionally need a tag).
@@ -154,6 +154,7 @@ fn unsupported_ty(t: &Type, items: &FileItems) -> bool {
         | Type::Bool
         | Type::Unit
         | Type::Never
+        | Type::Str
         | Type::Error
         | Type::Var(_) => false,
     }

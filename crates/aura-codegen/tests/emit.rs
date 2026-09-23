@@ -84,11 +84,11 @@ fn enum_match_emits_object() {
 }
 
 #[test]
-fn str_literal_blocks_codegen() {
+fn i128_literal_blocks_codegen() {
     let db = AuraDatabase::with_event_log(false);
     let file = SourceFile::new(
         &db,
-        "fn main() -> i64 { let s = \"hi\"\n 0 }".to_owned(),
+        "fn main() -> i64 { let s: i128 = 1\n 0 }".to_owned(),
         FileId(0),
     );
     let out = compile_file(&db, file);
@@ -117,6 +117,35 @@ fn result_param_and_struct_field_emit() {
         "struct B { r: Result<i64, i64> }\n\
          fn unwrap(r: Result<i64, i64>) -> i64 { match r { Ok(v) => v, Err(e) => e } }\n\
          fn main() -> i64 { let b = B { r: Ok(9) }\n unwrap(b.r) }",
+    );
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    assert!(out.object.is_some());
+}
+
+#[test]
+fn str_literal_emits_object() {
+    let out = compile("fn main() -> i64 { let s = \"hello\"\n if s.len == 5 { 1 } else { 0 } }");
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    assert!(out.object.is_some());
+}
+
+#[test]
+fn str_equality_imports_aura_str_eq() {
+    let out = compile("fn main() -> i64 { if \"a\" == \"a\" { 1 } else { 0 } }");
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    let obj = out.object.expect("object expected");
+    assert!(
+        obj.windows(11).any(|w| w == b"aura_str_eq"),
+        "object must import aura_str_eq"
+    );
+}
+
+#[test]
+fn str_param_return_and_struct_field_emit() {
+    let out = compile(
+        "struct P { s: str }\n\
+         fn id(x: str) -> str { x }\n\
+         fn main() -> i64 { let p = P { s: \"ab\" }\n if id(p.s) == \"ab\" { 3 } else { 0 } }",
     );
     assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
     assert!(out.object.is_some());

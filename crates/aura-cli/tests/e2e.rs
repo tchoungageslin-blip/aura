@@ -148,6 +148,22 @@ fn run_result_fixture_returns_11() {
 }
 
 #[test]
+fn run_strings_fixture_returns_6() {
+    if runtime_lib().is_none() {
+        return;
+    }
+    let out = aura(&["run", fixture("strings.aura").to_str().unwrap()]);
+    // strings.aura: all str checks pass → tag(1) + 5 = 6.
+    assert_eq!(
+        out.status.code(),
+        Some(6),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
 fn run_result_err_path_returns_3() {
     if runtime_lib().is_none() {
         return;
@@ -263,7 +279,7 @@ fn differential_interp_matches_compiled() {
     if runtime_lib().is_none() {
         return;
     }
-    for name in ["hello.aura", "enum.aura", "result.aura"] {
+    for name in ["hello.aura", "enum.aura", "result.aura", "strings.aura"] {
         let path = fixture(name);
         let path = path.to_str().unwrap();
         let compiled = aura(&["run", path]);

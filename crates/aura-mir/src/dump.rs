@@ -169,6 +169,7 @@ fn rvalue(r: &Rvalue) -> String {
                 format!("enum#{item}::v{variant} {{ {} }}", f.join(", "))
             }
         }
+        Rvalue::StrLit(s) => format!("strlit {s:?}"),
         Rvalue::Discriminant(p) => format!("disc({})", place(p)),
     }
 }

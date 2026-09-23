@@ -251,3 +251,28 @@ pub unsafe extern "C" fn aura_rt_release(ptr: *mut u8) {
         }
     }
 }
+
+// ----- str ----------------------------------------------------------------------
+
+/// Byte equality of two `str` payloads — the backend of `str ==`.
+/// Lengths are compared first, then contents via `memcmp`.
+///
+/// # Safety
+/// `l`/`r` must be valid for `l_len`/`r_len` bytes (or null when the
+/// length is zero).
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_str_eq(
+    l: *const u8,
+    l_len: usize,
+    r: *const u8,
+    r_len: usize,
+) -> i32 {
+    if l_len != r_len {
+        return 0;
+    }
+    if l_len == 0 {
+        return 1;
+    }
+    i32::from(unsafe { memcmp(l.cast(), r.cast(), l_len) } == 0)
+}

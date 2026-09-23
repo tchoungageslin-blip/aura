@@ -15,6 +15,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::rc::Rc;
 
 use aura_ast::{BinOp, Block, Expr, ExprId, Item, Literal, Pattern, Stmt, StmtId, UnOp};
 use aura_common::{Diagnostic, SourceCache};
@@ -26,7 +27,9 @@ pub enum Value {
     Int(i128),
     Float(f64),
     Bool(bool),
-    Str(String),
+    /// `Rc` shares the backing buffer across clones — `s.ptr` is stable
+    /// for the same value, matching the compiled `{ptr, len}` repr.
+    Str(Rc<str>),
     Unit,
     Struct {
         name: String,
@@ -495,6 +498,15 @@ impl<'a> Interp<'a> {
                             .cloned()
                             .ok_or(InterpError::Type("struct field index".into()))
                     }
+                    // `str` exposes its `{ ptr, len }` repr — `len` is the
+                    // byte count, `ptr` the buffer's address as an opaque int.
+                    Value::Str(s) => match fname.as_str() {
+                        "len" => Ok(Value::Int(i128::try_from(s.len()).unwrap_or(i128::MAX))),
+                        "ptr" => Ok(Value::Int(i128::from(
+                            u64::try_from(s.as_ptr().addr()).unwrap_or(u64::MAX),
+                        ))),
+                        _ => Err(InterpError::Type(format!("no field `{fname}` on `str`"))),
+                    },
                     v => Err(InterpError::Type(format!("field access on {v:?}"))),
                 }
             }
@@ -583,7 +595,7 @@ impl<'a> Interp<'a> {
             Literal::Float(v) => Value::Float(*v),
             Literal::Bool(v) => Value::Bool(*v),
             Literal::Unit => Value::Unit,
-            Literal::Str(s) => Value::Str(self.name_of(*s)),
+            Literal::Str(s) => Value::Str(Rc::from(self.name_of(*s))),
         }
     }
 
