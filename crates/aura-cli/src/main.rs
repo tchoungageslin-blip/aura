@@ -43,6 +43,8 @@ enum Command {
     },
     /// Compile, link, and run a file.
     Run { path: PathBuf },
+    /// Start the Language Server Protocol server over stdio.
+    Lsp,
     /// Format a file canonically (in place unless --check/--stdout).
     Fmt {
         path: PathBuf,
@@ -63,6 +65,7 @@ fn main() -> ExitCode {
         Command::Mir { path } => mir(&path),
         Command::Build { path, output } => build(&path, output.as_deref()),
         Command::Run { path } => run(&path),
+        Command::Lsp => ExitCode::from(u8::try_from(aura_lsp::serve()).unwrap_or(1)),
         Command::Fmt {
             path,
             check,

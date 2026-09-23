@@ -20,6 +20,7 @@ aura-hir = { path = "crates/aura-hir" }
 aura-mir = { path = "crates/aura-mir" }
 aura-codegen = { path = "crates/aura-codegen" }
 aura-fmt = { path = "crates/aura-fmt" }
+aura-lsp = { path = "crates/aura-lsp" }
 aura-linker = { path = "crates/aura-linker" }
 
 # External crates — versions resolved at build time, pinned via Cargo.lock
@@ -28,13 +29,13 @@ clap = { version = "4", features = ["derive"] }
 ariadne = "0.6"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
+async-lsp = "0.2"
 insta = "1"
 salsa = "0.28"
 indexmap = "2"
 rustc-hash = "2"
 unicode-xid = "0.2"
 tracing = "0.1"
-async-lsp = "0.2"
 arbitrary = { version = "1", features = ["derive"] }
 cranelift-codegen = "0.136"
 cranelift-frontend = "0.136"
