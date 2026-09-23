@@ -20,6 +20,7 @@ aura-lsp.workspace = true
 aura-linker.workspace = true
 aura-mir.workspace = true
 aura-parser.workspace = true
+aura-project.workspace = true
 aura-salsa-db.workspace = true
 aura-semantic.workspace = true
 clap.workspace = true

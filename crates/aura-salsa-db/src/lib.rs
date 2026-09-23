@@ -26,7 +26,9 @@ mod body;
 mod items;
 
 pub use body::{Body, fn_body};
-pub use items::{ExternFnSig, FileItems, ItemSig, ParamSig, TypeName, file_items};
+pub use items::{
+    ExternFnSig, FileItems, ItemSig, ParamSig, ProjectItems, TypeName, file_items, project_items,
+};
 
 use std::sync::{Arc, Mutex};
 
@@ -137,6 +139,23 @@ pub struct SourceFile {
     /// Compiler-assigned id embedded in every [`Span`](aura_common::Span).
     #[returns(copy)]
     pub file_id: FileId,
+}
+
+/// A multi-file compilation unit: every file's items share one flat
+/// namespace (alpha semantics — no module system yet). `files` is ordered
+/// deps-first; the entry point (`src/main.aura`) is always last.
+#[salsa::input]
+pub struct Project {
+    /// All compilation sources in project order.
+    #[returns(ref)]
+    pub files: Vec<SourceFile>,
+}
+
+// Salsa inputs don't derive `Debug`; `ProjectItems` wants it for `map`.
+impl std::fmt::Debug for SourceFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("SourceFile").field(&self.0).finish()
+    }
 }
 
 // ----- queries ---------------------------------------------------------------

@@ -13,10 +13,14 @@
 
 use aura_ast::{BinOp, BlockId, Expr, ExprId, Literal, MatchArm, Pattern, Stmt, StmtId};
 use aura_common::{Diagnostic, Span, codes};
-use aura_hir::hir_fn;
-use aura_salsa_db::{Body, Db, FileItems, ItemSig, SourceFile, file_items};
+use aura_hir::{HirBody, hir_fn, hir_project_fn};
+use aura_salsa_db::{
+    Body, Db, FileItems, ItemSig, ParamSig, Project, SourceFile, TypeName, file_items,
+    project_items,
+};
 use aura_semantic::{
     Def, FnTypes, IntTy, Resolution, Type, enum_variant_payload, lower_typename, resolved_file,
+    resolved_project,
 };
 use indexmap::IndexMap;
 use lasso::Spur;
@@ -46,12 +50,46 @@ pub fn mir_fn(db: &dyn Db, file: SourceFile, index: u32) -> Option<MirBody> {
         return None;
     }
     let hir = hir_fn(db, file, index).as_ref()?;
+    let res = resolved_file(db, file);
+    Some(lower_body(items, res, hir, name, params, ret.as_ref()))
+}
+
+/// Project-path counterpart of [`mir_fn`]: `index` is a global index into
+/// `project_items`. The body comes from the declaring file; signatures
+/// and name resolution use the merged project tables.
+#[salsa::tracked(returns(ref))]
+pub fn mir_project_fn(db: &dyn Db, project: Project, index: u32) -> Option<MirBody> {
+    let pi = project_items(db, project);
+    let ItemSig::Fn {
+        name,
+        params,
+        ret,
+        is_extern,
+    } = pi.merged.items.get(index as usize)?
+    else {
+        return None;
+    };
+    if *is_extern {
+        return None;
+    }
+    let hir = hir_project_fn(db, project, index).as_ref()?;
+    let res = resolved_project(db, project);
+    Some(lower_body(&pi.merged, res, hir, name, params, ret.as_ref()))
+}
+
+/// Shared lowering driver: locals init (`_0` return place + params),
+/// block lowering, and the return-terminator epilogue.
+fn lower_body(
+    items: &FileItems,
+    res: &Resolution,
+    hir: &HirBody,
+    name: &str,
+    params: &[ParamSig],
+    ret: Option<&TypeName>,
+) -> MirBody {
     let body = &hir.body;
     let types = &hir.types;
-    let res = resolved_file(db, file);
-    let ret_ty = ret
-        .as_ref()
-        .map_or(Type::Unit, |t| lower_typename(items, t));
+    let ret_ty = ret.map_or(Type::Unit, |t| lower_typename(items, t));
 
     let mut locals = Vec::new();
     // _0: return place.
@@ -104,14 +142,14 @@ pub fn mir_fn(db: &dyn Db, file: SourceFile, index: u32) -> Option<MirBody> {
         }
         l.terminate(MirTerm::Return);
     }
-    Some(MirBody {
-        name: name.clone(),
+    MirBody {
+        name: name.to_owned(),
         locals: l.locals,
         param_count: u32::try_from(params.len()).unwrap_or(u32::MAX),
         blocks: l.blocks,
         ret: ret_ty,
         diagnostics: l.diags,
-    })
+    }
 }
 
 struct Lowerer<'a> {

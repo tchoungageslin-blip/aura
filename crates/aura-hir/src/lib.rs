@@ -12,8 +12,8 @@
 //! leaves both `fn_body` and `typeck_fn` outputs equal still backdates
 //! all downstream MIR queries in one step.
 
-use aura_salsa_db::{Body, Db, SourceFile, fn_body};
-use aura_semantic::{FnTypes, typeck_fn};
+use aura_salsa_db::{Body, Db, Project, SourceFile, fn_body, project_items};
+use aura_semantic::{FnTypes, typeck_fn, typeck_project_fn};
 
 /// A function's resolved body + finalized type table.
 #[derive(Debug, PartialEq)]
@@ -31,6 +31,20 @@ pub struct HirBody {
 pub fn hir_fn(db: &dyn Db, file: SourceFile, index: u32) -> Option<HirBody> {
     let body = fn_body(db, file, index).as_ref()?;
     let types = typeck_fn(db, file, index).as_ref()?;
+    Some(HirBody {
+        body: body.clone(),
+        types: types.clone(),
+    })
+}
+
+/// Project-path counterpart of [`hir_fn`]: `index` is a global index into
+/// `project_items`; the body comes from the declaring file via the item
+/// map while the type table was checked against the merged namespace.
+#[salsa::tracked(returns(ref))]
+pub fn hir_project_fn(db: &dyn Db, project: Project, index: u32) -> Option<HirBody> {
+    let (file, local) = project_items(db, project).locate(index)?;
+    let body = fn_body(db, file, local).as_ref()?;
+    let types = typeck_project_fn(db, project, index).as_ref()?;
     Some(HirBody {
         body: body.clone(),
         types: types.clone(),

@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use aura_common::{SourceCache, render_diagnostics};
-use aura_salsa_db::{AuraDatabase, SourceFile, file_items, parsed};
-use aura_semantic::check_file;
+use aura_salsa_db::{AuraDatabase, Project, SourceFile, project_items};
+use aura_semantic::check_project;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -25,31 +25,33 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Parse, resolve, and type-check a source file.
+    /// Parse, resolve, and type-check a source file or project.
     Check {
-        /// Path to a `.aura` source file.
-        path: PathBuf,
+        /// `.aura` file, project dir, or manifest (default: `.`).
+        path: Option<PathBuf>,
     },
     /// Parse a file and print its s-expression AST.
-    Parse { path: PathBuf },
+    Parse { path: Option<PathBuf> },
     /// Lower a file to MIR and print it (debugging).
-    Mir { path: PathBuf },
-    /// Compile and link a file into an executable.
+    Mir { path: Option<PathBuf> },
+    /// Compile and link a file or project into an executable.
     Build {
-        path: PathBuf,
-        /// Output executable path (default: `<file>` + platform suffix).
+        path: Option<PathBuf>,
+        /// Output executable path (default: `build/<package>` for
+        /// projects, `<file>` + platform suffix otherwise).
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
-    /// Compile, link, and run a file.
-    Run { path: PathBuf },
+    /// Compile, link, and run a file or project.
+    Run { path: Option<PathBuf> },
     /// Interpret `main` directly (no codegen) and forward its exit code.
-    Interp { path: PathBuf },
+    Interp { path: Option<PathBuf> },
     /// Start the Language Server Protocol server over stdio.
     Lsp,
-    /// Format a file canonically (in place unless --check/--stdout).
+    /// Format a file or every source unit of a project canonically
+    /// (in place unless --check/--stdout).
     Fmt {
-        path: PathBuf,
+        path: Option<PathBuf>,
         /// Exit non-zero if the file isn't already formatted.
         #[arg(long)]
         check: bool,
@@ -61,30 +63,39 @@ enum Command {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    let or_cwd = |p: Option<PathBuf>| p.unwrap_or_else(|| PathBuf::from("."));
     match cli.command {
-        Command::Check { path } => check(&path),
-        Command::Parse { path } => parse(&path),
-        Command::Mir { path } => mir(&path),
-        Command::Build { path, output } => build(&path, output.as_deref()),
-        Command::Run { path } => run(&path),
+        Command::Check { path } => check(&or_cwd(path)),
+        Command::Parse { path } => parse(&or_cwd(path)),
+        Command::Mir { path } => mir(&or_cwd(path)),
+        Command::Build { path, output } => build(&or_cwd(path), output.as_deref()),
+        Command::Run { path } => run(&or_cwd(path)),
         Command::Lsp => ExitCode::from(u8::try_from(aura_lsp::serve()).unwrap_or(1)),
-        Command::Interp { path } => interp(&path),
+        Command::Interp { path } => interp(&or_cwd(path)),
         Command::Fmt {
             path,
             check,
             stdout,
-        } => fmt(&path, check, stdout),
+        } => fmt(&or_cwd(path), check, stdout),
     }
 }
 
-fn load(path: &Path) -> Result<(AuraDatabase, SourceFile, SourceCache), std::io::Error> {
-    let text = std::fs::read_to_string(path)?;
+/// Resolve `path` (a `.aura` file, a directory containing `aura.toml`, or
+/// a manifest path) into a salsa `Project` plus a `SourceCache` covering
+/// every unit, so diagnostics attribute to real paths.
+fn load_project(path: &Path) -> Result<(AuraDatabase, Project, SourceCache), String> {
+    let spec = aura_project::load(path).map_err(|e| e.to_string())?;
     let mut cache = SourceCache::new();
-    let name = path.display().to_string();
-    let file_id = cache.add(name, text.clone());
     let db = AuraDatabase::with_event_log(false);
-    let file = SourceFile::new(&db, text, file_id);
-    Ok((db, file, cache))
+    let mut files = Vec::new();
+    for unit in &spec.sources {
+        let text = std::fs::read_to_string(&unit.path)
+            .map_err(|e| format!("cannot read {}: {e}", unit.path.display()))?;
+        let file_id = cache.add(unit.path.display().to_string(), text.clone());
+        files.push(SourceFile::new(&db, text, file_id));
+    }
+    let project = Project::new(&db, files);
+    Ok((db, project, cache))
 }
 
 fn render(diags: &[aura_common::Diagnostic], cache: &SourceCache) -> bool {
@@ -97,14 +108,14 @@ fn render(diags: &[aura_common::Diagnostic], cache: &SourceCache) -> bool {
 }
 
 fn check(path: &Path) -> ExitCode {
-    let (db, file, cache) = match load(path) {
+    let (db, project, cache) = match load_project(path) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("error: cannot read {}: {e}", path.display());
+            eprintln!("error: {e}");
             return ExitCode::FAILURE;
         }
     };
-    let diags = check_file(&db, file);
+    let diags = check_project(&db, project);
     if render(diags.as_slice(), &cache) {
         return ExitCode::FAILURE;
     }
@@ -112,18 +123,18 @@ fn check(path: &Path) -> ExitCode {
 }
 
 fn interp(path: &Path) -> ExitCode {
-    let (db, file, cache) = match load(path) {
+    let (db, project, cache) = match load_project(path) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("error: cannot read {}: {e}", path.display());
+            eprintln!("error: {e}");
             return ExitCode::FAILURE;
         }
     };
-    let diags = check_file(&db, file);
+    let diags = check_project(&db, project);
     if render(diags.as_slice(), &cache) {
         return ExitCode::FAILURE;
     }
-    match aura_interp::run_parsed(parsed(&db, file)) {
+    match aura_interp::run_project(&db, project) {
         Ok(v) => ExitCode::from(u8::try_from(v).unwrap_or(1)),
         Err(e) => {
             eprintln!("error: {e}");
@@ -133,14 +144,16 @@ fn interp(path: &Path) -> ExitCode {
 }
 
 fn parse(path: &Path) -> ExitCode {
-    let (db, file, _cache) = match load(path) {
+    let (db, project, _cache) = match load_project(path) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("error: cannot read {}: {e}", path.display());
+            eprintln!("error: {e}");
             return ExitCode::FAILURE;
         }
     };
-    let p = parsed(&db, file);
+    // Dump the entry unit (always last).
+    let entry = *project.files(&db).last().expect("project has an entry");
+    let p = aura_salsa_db::parsed(&db, entry);
     for line in p.dump().lines() {
         println!("{line}");
     }
@@ -152,22 +165,22 @@ fn parse(path: &Path) -> ExitCode {
 }
 
 fn mir(path: &Path) -> ExitCode {
-    let (db, file, cache) = match load(path) {
+    let (db, project, cache) = match load_project(path) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("error: cannot read {}: {e}", path.display());
+            eprintln!("error: {e}");
             return ExitCode::FAILURE;
         }
     };
-    if render(check_file(&db, file), &cache) {
+    if render(check_project(&db, project), &cache) {
         return ExitCode::FAILURE;
     }
-    let items = file_items(&db, file);
-    for (i, sig) in items.iter() {
+    let items = &project_items(&db, project).merged;
+    for (g, sig) in items.iter() {
         if !matches!(sig, aura_salsa_db::ItemSig::Fn { .. }) {
             continue;
         }
-        if let Some(m) = aura_mir::mir_fn(&db, file, i).as_ref() {
+        if let Some(m) = aura_mir::mir_project_fn(&db, project, g).as_ref() {
             print!("{}", aura_mir::dump(m));
         }
     }
@@ -176,17 +189,17 @@ fn mir(path: &Path) -> ExitCode {
 
 /// Compile to an object; render any diagnostics. `None` on failure.
 fn compile(path: &Path) -> Option<(Vec<u8>, SourceCache)> {
-    let (db, file, cache) = match load(path) {
+    let (db, project, cache) = match load_project(path) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("error: cannot read {}: {e}", path.display());
+            eprintln!("error: {e}");
             return None;
         }
     };
-    if render(check_file(&db, file), &cache) {
+    if render(check_project(&db, project), &cache) {
         return None;
     }
-    let out = aura_codegen::compile_file(&db, file);
+    let out = aura_codegen::compile_project(&db, project);
     if render(&out.diagnostics, &cache) {
         return None;
     }
@@ -230,6 +243,22 @@ fn runtime_lib() -> Result<PathBuf, String> {
     Err("aura_runtime.lib not found — build it with `cargo build --manifest-path runtime/Cargo.toml`".into())
 }
 
+/// Default output path: `<project-root>/build/<package>[.exe]` for
+/// manifest projects, `<file>[.exe]` beside a bare source file.
+fn default_output(path: &Path) -> PathBuf {
+    let ext = if cfg!(windows) { "exe" } else { "" };
+    if let Ok(spec) = aura_project::load(path)
+        && spec.manifest_path.is_some()
+    {
+        let dir = spec.root.join("build");
+        let _ = std::fs::create_dir_all(&dir);
+        return dir.join(&spec.manifest.package.name).with_extension(ext);
+    }
+    let mut out = path.to_path_buf();
+    out.set_extension(ext);
+    out
+}
+
 fn link(obj: &Path, out: &Path) -> ExitCode {
     let rt = match runtime_lib() {
         Ok(p) => p,
@@ -264,15 +293,9 @@ fn build(path: &Path, output: Option<&Path>) -> ExitCode {
     let Some((obj_bytes, _cache)) = compile(path) else {
         return ExitCode::FAILURE;
     };
-    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-    let out = output.map_or_else(
-        || {
-            let mut p = PathBuf::from(stem.as_ref());
-            p.set_extension(if cfg!(windows) { "exe" } else { "" });
-            p
-        },
-        Path::to_path_buf,
-    );
+    // Default output: <project>/build/<package>[.exe], or <stem>[.exe]
+    // beside a bare source file.
+    let out = output.map_or_else(|| default_output(path), Path::to_path_buf);
     let obj = out.with_extension("o");
     if let Err(e) = std::fs::write(&obj, &obj_bytes) {
         eprintln!("error: cannot write {}: {e}", obj.display());
@@ -282,6 +305,31 @@ fn build(path: &Path, output: Option<&Path>) -> ExitCode {
 }
 
 fn fmt(path: &Path, check: bool, to_stdout: bool) -> ExitCode {
+    if path.is_dir() {
+        // Project mode: format every source unit (deps first).
+        let spec = match aura_project::load(path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let mut failed = false;
+        for unit in &spec.sources {
+            if fmt_one(&unit.path, check, to_stdout) == ExitCode::FAILURE {
+                failed = true;
+            }
+        }
+        return if failed {
+            ExitCode::FAILURE
+        } else {
+            ExitCode::SUCCESS
+        };
+    }
+    fmt_one(path, check, to_stdout)
+}
+
+fn fmt_one(path: &Path, check: bool, to_stdout: bool) -> ExitCode {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) => {

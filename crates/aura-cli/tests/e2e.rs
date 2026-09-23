@@ -301,3 +301,89 @@ fn interp_propagates_exit_code() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+/// Write a two-package project (`app` depends on `util`) under `dir`.
+fn write_project(dir: &Path) {
+    std::fs::create_dir_all(dir.join("app/src")).unwrap();
+    std::fs::create_dir_all(dir.join("util/src")).unwrap();
+    std::fs::write(
+        dir.join("app/aura.toml"),
+        "[package]\nname = \"app\"\n\n[dependencies]\nutil = { path = \"../util\" }\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("util/aura.toml"), "[package]\nname = \"util\"\n").unwrap();
+    std::fs::write(
+        dir.join("util/src/lib.aura"),
+        "fn thrice(x: i64) -> i64 { x * 3 }\n\nstruct Pair { a: i64, b: i64 }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app/src/main.aura"),
+        "fn main() -> i64 {\n    let p = Pair { a: 10, b: 4 }\n    thrice(p.a) + p.b\n}\n",
+    )
+    .unwrap();
+}
+
+#[test]
+fn project_check_interp_and_run() {
+    let dir = std::env::temp_dir().join(format!("aura-e2e-proj-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    write_project(&dir);
+    let app = dir.join("app");
+
+    let out = aura(&["check", app.to_str().unwrap()]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // Interp and compiled must agree on the cross-file program (34).
+    let interp = aura(&["interp", app.to_str().unwrap()]);
+    assert_eq!(interp.status.code(), Some(34));
+    if runtime_lib().is_some() {
+        let ran = aura(&["run", app.to_str().unwrap()]);
+        assert_eq!(ran.status.code(), Some(34));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn project_dep_error_points_at_dep_file() {
+    let dir = std::env::temp_dir().join(format!("aura-e2e-projerr-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    write_project(&dir);
+    // Break the dep: arithmetic on str is a semantic error in lib.aura.
+    std::fs::write(
+        dir.join("util/src/lib.aura"),
+        "fn broken() -> i64 {\n    \"s\" + 1\n}\n",
+    )
+    .unwrap();
+    let out = aura(&["check", dir.join("app").to_str().unwrap()]);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("lib.aura"),
+        "dep error should attribute to lib.aura: {stderr}"
+    );
+}
+
+#[test]
+fn project_no_args_uses_cwd_manifest() {
+    // `aura check` with no path discovers aura.toml from the CWD.
+    let dir = std::env::temp_dir().join(format!("aura-e2e-projcwd-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    write_project(&dir);
+    let out = Command::new(AURA)
+        .args(["check"])
+        .current_dir(dir.join("app"))
+        .output()
+        .expect("spawn aura");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

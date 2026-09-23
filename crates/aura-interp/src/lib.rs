@@ -137,7 +137,29 @@ pub fn run_source(src: &str) -> Result<i64, RunError> {
 /// # Errors
 /// See [`run_source`].
 pub fn run_parsed(parsed: &aura_parser::ParsedFile) -> Result<i64, InterpError> {
-    let mut interp = Interp::new(parsed);
+    run_files(&[parsed])
+}
+
+/// Interpret `main` across a project's files (flat namespace — dep items
+/// are visible everywhere). `files` matches `Project::files` order; the
+/// entry file is last but `main` may resolve from any file.
+///
+/// # Errors
+/// See [`run_source`].
+pub fn run_project(
+    db: &dyn aura_salsa_db::Db,
+    project: aura_salsa_db::Project,
+) -> Result<i64, InterpError> {
+    let files: Vec<&aura_parser::ParsedFile> = project
+        .files(db)
+        .iter()
+        .map(|f| aura_salsa_db::parsed(db, *f))
+        .collect();
+    run_files(&files)
+}
+
+fn run_files(files: &[&aura_parser::ParsedFile]) -> Result<i64, InterpError> {
+    let mut interp = Interp::new(files);
     match interp.call_main()? {
         Value::Int(v) => {
             i64::try_from(v).map_err(|_| InterpError::Type("main result out of i64 range".into()))
@@ -183,11 +205,17 @@ enum Builtin {
 
 /// The interpreter: item tables plus a scope stack and fuel.
 struct Interp<'a> {
-    parsed: &'a aura_parser::ParsedFile,
-    /// `fn name` → item index in `parsed.items`.
-    fns: HashMap<String, usize>,
-    /// `struct name` → field names in declared order.
-    structs: HashMap<String, Vec<Spur>>,
+    /// One `ParsedFile` per project unit (single-file runs hold one).
+    files: Vec<&'a aura_parser::ParsedFile>,
+    /// Index into `files` of the file whose function is executing — Spurs
+    /// are interned per-file, so name resolution follows the *current*
+    /// file's rodeo.
+    cur: usize,
+    /// `fn name` → `(file index, item index)`.
+    fns: HashMap<String, (usize, usize)>,
+    /// `struct name` → field names in declared order (resolved at table
+    /// build time so accessor rodeos don't matter).
+    structs: HashMap<String, Vec<String>>,
     /// `variant name` → `(enum name, payload arity)`.
     variants: HashMap<String, (String, usize)>,
     /// `extern fn` names the interpreter can execute (see [`Builtin`]).
@@ -199,9 +227,10 @@ struct Interp<'a> {
 const STEP_LIMIT: u64 = 5_000_000;
 
 impl<'a> Interp<'a> {
-    fn new(parsed: &'a aura_parser::ParsedFile) -> Self {
+    fn new(files: &[&'a aura_parser::ParsedFile]) -> Self {
         let mut this = Self {
-            parsed,
+            files: files.to_vec(),
+            cur: 0,
             fns: HashMap::new(),
             structs: HashMap::new(),
             variants: HashMap::new(),
@@ -209,45 +238,54 @@ impl<'a> Interp<'a> {
             scopes: vec![HashMap::new()],
             steps: 0,
         };
-        for (i, item) in parsed.items.iter().enumerate() {
-            match item {
-                Item::Function(f) if !f.is_extern => {
-                    this.fns.insert(this.name_of(f.name), i);
-                }
-                Item::Struct(s) => {
-                    let fields = s.fields.iter().map(|f| f.name).collect();
-                    this.structs.insert(this.name_of(s.name), fields);
-                }
-                Item::Enum(e) => {
-                    let ename = this.name_of(e.name);
-                    for v in &e.variants {
-                        let arity = match &v.payload {
-                            aura_ast::VariantPayload::None => 0,
-                            aura_ast::VariantPayload::Tuple(ts) => ts.len(),
-                        };
-                        this.variants
-                            .insert(this.name_of(v.name), (ename.clone(), arity));
+        for (fi, parsed) in this.files.iter().enumerate() {
+            this.cur = fi;
+            for (i, item) in parsed.items.iter().enumerate() {
+                match item {
+                    Item::Function(f) if !f.is_extern => {
+                        this.fns.entry(this.name_of(f.name)).or_insert((fi, i));
                     }
-                }
-                Item::ExternBlock { fns, .. } => {
-                    for f in fns {
-                        let name = this.name_of(f.name);
-                        if Builtin::by_name(&name).is_some() {
-                            this.builtins.insert(name);
+                    Item::Struct(s) => {
+                        let fields = s.fields.iter().map(|f| this.name_of(f.name)).collect();
+                        this.structs.entry(this.name_of(s.name)).or_insert(fields);
+                    }
+                    Item::Enum(e) => {
+                        let ename = this.name_of(e.name);
+                        for v in &e.variants {
+                            let arity = match &v.payload {
+                                aura_ast::VariantPayload::None => 0,
+                                aura_ast::VariantPayload::Tuple(ts) => ts.len(),
+                            };
+                            this.variants
+                                .entry(this.name_of(v.name))
+                                .or_insert((ename.clone(), arity));
                         }
                     }
+                    Item::ExternBlock { fns, .. } => {
+                        for f in fns {
+                            let name = this.name_of(f.name);
+                            if Builtin::by_name(&name).is_some() {
+                                this.builtins.insert(name);
+                            }
+                        }
+                    }
+                    Item::Function(_) | Item::Use { .. } | Item::Error { .. } => {}
                 }
-                Item::Function(_) | Item::Use { .. } | Item::Error { .. } => {}
             }
         }
+        this.cur = 0;
         // Built-in `Result` constructors — single-payload variants.
         this.variants.insert("Ok".into(), ("Result".into(), 1));
         this.variants.insert("Err".into(), ("Result".into(), 1));
         this
     }
 
+    fn parsed(&self) -> &'a aura_parser::ParsedFile {
+        self.files[self.cur]
+    }
+
     fn name_of(&self, spur: Spur) -> String {
-        self.parsed.rodeo.resolve(&spur).to_owned()
+        self.parsed().rodeo.resolve(&spur).to_owned()
     }
 
     fn tick(&mut self) -> Result<(), InterpError> {
@@ -259,17 +297,35 @@ impl<'a> Interp<'a> {
     }
 
     fn call_main(&mut self) -> Result<Value, InterpError> {
-        let Some(&idx) = self.fns.get("main") else {
+        let Some(&(fi, idx)) = self.fns.get("main") else {
             return Err(InterpError::NoMain);
         };
-        self.call_fn(idx, &[])
+        self.call_fn(fi, idx, &[])
     }
 
     // ----- functions ----------------------------------------------------------
 
-    fn call_fn(&mut self, item_idx: usize, args: &[Value]) -> Result<Value, InterpError> {
+    fn call_fn(
+        &mut self,
+        file_idx: usize,
+        item_idx: usize,
+        args: &[Value],
+    ) -> Result<Value, InterpError> {
         self.tick()?;
-        let Item::Function(f) = &self.parsed.items[item_idx] else {
+        // Function bodies see only their own scope — swap the caller's
+        // scope stack out so callee idents can never bind to caller locals
+        // (and so per-file Spurs from different files can't collide).
+        let saved_scopes = std::mem::replace(&mut self.scopes, vec![HashMap::new()]);
+        let saved_cur = self.cur;
+        self.cur = file_idx;
+        let out = self.call_fn_inner(item_idx, args);
+        self.cur = saved_cur;
+        self.scopes = saved_scopes;
+        out
+    }
+
+    fn call_fn_inner(&mut self, item_idx: usize, args: &[Value]) -> Result<Value, InterpError> {
+        let Item::Function(f) = &self.parsed().items[item_idx] else {
             return Err(InterpError::Unresolved(format!("item {item_idx}")));
         };
         let Some(body_id) = f.body else {
@@ -311,7 +367,7 @@ impl<'a> Interp<'a> {
 
     fn block(&mut self, id: aura_ast::BlockId) -> Result<Flow, InterpError> {
         self.tick()?;
-        let Block { stmts, tail, .. } = self.parsed.ast.block(id).clone();
+        let Block { stmts, tail, .. } = self.parsed().ast.block(id).clone();
         self.scopes.push(HashMap::new());
         let mut out = Flow::Value(Value::Unit);
         for sid in stmts {
@@ -349,7 +405,7 @@ impl<'a> Interp<'a> {
 
     fn stmt(&mut self, id: StmtId) -> Result<Flow, InterpError> {
         self.tick()?;
-        match self.parsed.ast.stmt(id).clone() {
+        match self.parsed().ast.stmt(id).clone() {
             Stmt::Let { name, init, .. } => {
                 let v = self.expr(init)?;
                 self.scopes.last_mut().expect("scope").insert(name, v);
@@ -398,7 +454,7 @@ impl<'a> Interp<'a> {
 
     fn expr(&mut self, id: ExprId) -> Result<Value, InterpError> {
         self.tick()?;
-        match self.parsed.ast.expr(id).clone() {
+        match self.parsed().ast.expr(id).clone() {
             Expr::Error => Err(InterpError::Type("error expr".into())),
             Expr::Literal(l) => Ok(self.literal(&l)),
             Expr::Ident(name) => self.lookup(name),
@@ -409,7 +465,7 @@ impl<'a> Interp<'a> {
             }
             Expr::Assign { target, value } => {
                 let v = self.expr(value)?;
-                let Expr::Ident(name) = self.parsed.ast.expr(target) else {
+                let Expr::Ident(name) = self.parsed().ast.expr(target) else {
                     return Err(InterpError::Unsupported("non-ident assignment"));
                 };
                 for scope in self.scopes.iter_mut().rev() {
@@ -432,7 +488,7 @@ impl<'a> Interp<'a> {
                             .ok_or_else(|| InterpError::Unresolved(name.clone()))?;
                         let idx = names
                             .iter()
-                            .position(|f| self.name_of(*f) == fname)
+                            .position(|f| *f == fname)
                             .ok_or_else(|| InterpError::Unresolved(fname.clone()))?;
                         fields
                             .get(idx)
@@ -508,9 +564,9 @@ impl<'a> Interp<'a> {
         for d in &defs {
             let v = vals
                 .iter()
-                .find(|(n, _)| n == &self.name_of(*d))
+                .find(|(n, _)| n == d)
                 .map(|(_, v)| v.clone())
-                .ok_or_else(|| InterpError::Unresolved(self.name_of(*d)))?;
+                .ok_or_else(|| InterpError::Unresolved(d.clone()))?;
             ordered.push(v);
         }
         Ok(Value::Struct {
@@ -605,7 +661,7 @@ impl<'a> Interp<'a> {
             .iter()
             .map(|a| self.expr(*a))
             .collect::<Result<_, _>>()?;
-        let Expr::Ident(name) = self.parsed.ast.expr(callee) else {
+        let Expr::Ident(name) = self.parsed().ast.expr(callee) else {
             return Err(InterpError::Unsupported("indirect call"));
         };
         let cname = self.name_of(*name);
@@ -626,10 +682,10 @@ impl<'a> Interp<'a> {
             let b = Builtin::by_name(&cname).expect("registered builtin");
             return b.call(&vals);
         }
-        let Some(&idx) = self.fns.get(&cname) else {
+        let Some(&(fi, idx)) = self.fns.get(&cname) else {
             return Err(InterpError::Unresolved(cname));
         };
-        self.call_fn(idx, &vals)
+        self.call_fn(fi, idx, &vals)
     }
 
     fn match_expr(

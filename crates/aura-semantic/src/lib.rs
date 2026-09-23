@@ -16,6 +16,9 @@ mod ty;
 mod typeck;
 
 pub use infer::{InferCtx, UnifyError, VarKind};
-pub use resolve::{Def, Duplicate, Resolution, resolved_file};
+pub use resolve::{Def, Duplicate, Resolution, resolved_file, resolved_project};
 pub use ty::{FloatTy, IntTy, Type, primitive};
-pub use typeck::{FnTypes, check_file, enum_variant_payload, lower_typename, typeck_fn};
+pub use typeck::{
+    FnTypes, check_file, check_project, enum_variant_payload, lower_typename, typeck_fn,
+    typeck_project_fn,
+};

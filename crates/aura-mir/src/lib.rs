@@ -16,7 +16,7 @@ mod dump;
 mod lower;
 
 pub use dump::dump;
-pub use lower::mir_fn;
+pub use lower::{mir_fn, mir_project_fn};
 
 use aura_ast::{BinOp, UnOp};
 use aura_common::Diagnostic;

@@ -13,12 +13,14 @@
 
 use aura_ast::{BinOp, BlockId, Expr, ExprId, Literal, Pattern, Stmt, TypeExpr, TypeExprId, UnOp};
 use aura_common::{Diagnostic, Span, codes};
-use aura_salsa_db::{Body, Db, FileItems, ItemSig, SourceFile, TypeName, file_items, fn_body};
+use aura_salsa_db::{
+    Body, Db, FileItems, ItemSig, Project, SourceFile, TypeName, file_items, fn_body, project_items,
+};
 use indexmap::IndexMap;
 use lasso::Spur;
 
 use crate::infer::{InferCtx, VarKind};
-use crate::resolve::{Def, Resolution, resolved_file};
+use crate::resolve::{Def, Resolution, resolved_file, resolved_project};
 use crate::ty::{self, Type};
 
 /// Result of checking one function body.
@@ -73,9 +75,44 @@ pub fn typeck_fn(db: &dyn Db, file: SourceFile, index: u32) -> Option<FnTypes> {
     }
     let body = fn_body(db, file, index).as_ref()?;
     let res = resolved_file(db, file);
-    let expected_ret = ret
-        .as_ref()
-        .map_or(Type::Unit, |t| lower_typename(items, t));
+    Some(check_fn(items, res, body, params, ret.as_ref()))
+}
+
+/// Type-check project item `index` — `index` is a global index into
+/// `project_items`. The body's file is recovered via the item map, so
+/// spans stay attributed to the declaring file.
+#[salsa::tracked(returns(ref))]
+pub fn typeck_project_fn(db: &dyn Db, project: Project, index: u32) -> Option<FnTypes> {
+    let pi = project_items(db, project);
+    let (file, local) = pi.locate(index)?;
+    let ItemSig::Fn {
+        params,
+        ret,
+        is_extern,
+        ..
+    } = pi.merged.items.get(index as usize)?
+    else {
+        return None;
+    };
+    if *is_extern {
+        return None;
+    }
+    let body = fn_body(db, file, local).as_ref()?;
+    let res = resolved_project(db, project);
+    Some(check_fn(&pi.merged, res, body, params, ret.as_ref()))
+}
+
+/// The shared checker driver: run `body` against `items`/`res`, unify
+/// the tail with the declared return type, then finalize every recorded
+/// expression type.
+fn check_fn(
+    items: &FileItems,
+    res: &Resolution,
+    body: &Body,
+    params: &[aura_salsa_db::ParamSig],
+    ret: Option<&TypeName>,
+) -> FnTypes {
+    let expected_ret = ret.map_or(Type::Unit, |t| lower_typename(items, t));
     let mut ck = Checker {
         body,
         items,
@@ -132,11 +169,11 @@ pub fn typeck_fn(db: &dyn Db, file: SourceFile, index: u32) -> Option<FnTypes> {
         }
     }
 
-    Some(FnTypes {
+    FnTypes {
         exprs: ck.expr_types,
         ret: ck.expected_ret,
         diagnostics: ck.diags,
-    })
+    }
 }
 
 // ----- checking ---------------------------------------------------------------
@@ -1128,5 +1165,53 @@ pub fn check_file(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
     }
 
     diags.sort_by_key(|d| d.span.map_or(0, |s| s.start));
+    diags
+}
+
+/// Whole-project check — the multi-file counterpart of [`check_file`].
+/// Parse diagnostics come from each file; redefinition and type
+/// diagnostics resolve through the merged item table, so spans stay
+/// attributed to the file that declared each item.
+#[salsa::tracked(returns(ref))]
+pub fn check_project(db: &dyn Db, project: Project) -> Vec<Diagnostic> {
+    let pi = project_items(db, project);
+    let res = resolved_project(db, project);
+
+    let mut diags = Vec::new();
+    for file in project.files(db) {
+        diags.extend(aura_salsa_db::parsed(db, *file).diagnostics.iter().cloned());
+    }
+
+    let item_span = |global: u32| -> Span {
+        pi.locate(global)
+            .and_then(|(f, local)| {
+                aura_salsa_db::parsed(db, f)
+                    .items
+                    .get(local as usize)
+                    .map(aura_ast::Item::span)
+            })
+            .unwrap_or_else(|| Span::point(project.files(db)[0].file_id(db), 0))
+    };
+    for dup in &res.duplicates {
+        diags.push(
+            Diagnostic::error(
+                codes::SEM_REDEFINITION,
+                format!("redefinition of `{}`", dup.name),
+                item_span(dup.dup),
+            )
+            .with_label(item_span(dup.first), "first defined here"),
+        );
+    }
+
+    for (g, sig) in pi.merged.iter() {
+        if !matches!(sig, ItemSig::Fn { .. }) {
+            continue;
+        }
+        if let Some(types) = typeck_project_fn(db, project, g).as_ref() {
+            diags.extend(types.diagnostics.iter().cloned());
+        }
+    }
+
+    diags.sort_by_key(|d| d.span.map_or((0, 0), |s| (s.file.0, s.start)));
     diags
 }

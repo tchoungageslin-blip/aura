@@ -10,7 +10,7 @@
 //! [`Resolution::duplicates`] data — `check_file` attaches the spans and
 //! emits `E2003`, since this query deliberately carries no positions.
 
-use aura_salsa_db::{Db, FileItems, ItemSig, SourceFile, file_items};
+use aura_salsa_db::{Db, FileItems, ItemSig, Project, SourceFile, file_items, project_items};
 use indexmap::IndexMap;
 
 /// What a bare name resolves to in value position.
@@ -62,6 +62,15 @@ impl Resolution {
 #[salsa::tracked(returns(ref))]
 pub fn resolved_file(db: &dyn Db, file: SourceFile) -> Resolution {
     resolve_items(file_items(db, file))
+}
+
+/// Resolve names across a whole project — `Def` payloads are global
+/// indices into [`project_items`](aura_salsa_db::project_items).merged.
+/// Depends on each file's `file_items`, so single-file body edits still
+/// backdate this query.
+#[salsa::tracked(returns(ref))]
+pub fn resolved_project(db: &dyn Db, project: Project) -> Resolution {
+    resolve_items(&project_items(db, project).merged)
 }
 
 fn resolve_items(items: &FileItems) -> Resolution {

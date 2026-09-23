@@ -14,9 +14,9 @@ mod layout;
 pub use emit::Emitted;
 pub use layout::{Layout, enum_layout, layout_of, scalar_size_align, struct_layout};
 
-use aura_common::{Diagnostic, Span, codes};
-use aura_mir::mir_fn;
-use aura_salsa_db::{Db, FileItems, ItemSig, SourceFile, file_items};
+use aura_common::{Diagnostic, FileId, Span, codes};
+use aura_mir::{MirBody, mir_fn, mir_project_fn};
+use aura_salsa_db::{Db, FileItems, ItemSig, Project, SourceFile, file_items, project_items};
 use aura_semantic::{IntTy, Type, lower_typename};
 
 /// Result of compiling one file.
@@ -46,10 +46,42 @@ pub fn compile_file(db: &dyn Db, file: SourceFile) -> CompileOutput {
         diagnostics.extend(mir.diagnostics.iter().cloned());
         mirs.push((i, mir.clone()));
     }
+    finish_compile(items, &mirs, diagnostics, file_id)
+}
 
+/// Compile a multi-file [`Project`]: same pipeline as [`compile_file`]
+/// over the merged `project_items` table — callables resolve across files
+/// because `Callee`/`Def` payloads index that table globally.
+pub fn compile_project(db: &dyn Db, project: Project) -> CompileOutput {
+    let pi = project_items(db, project);
+    let file_id = project.files(db)[0].file_id(db);
+    let mut diagnostics = Vec::new();
+    let mut mirs = Vec::new();
+
+    for (g, sig) in pi.merged.iter() {
+        if !matches!(sig, ItemSig::Fn { .. }) {
+            continue;
+        }
+        let Some(mir) = mir_project_fn(db, project, g).as_ref() else {
+            continue;
+        };
+        diagnostics.extend(mir.diagnostics.iter().cloned());
+        mirs.push((g, mir.clone()));
+    }
+    finish_compile(&pi.merged, &mirs, diagnostics, file_id)
+}
+
+/// Validate collected MIR bodies and emit the object — the shared tail
+/// of the single-file and project compile paths.
+fn finish_compile(
+    items: &FileItems,
+    mirs: &[(u32, MirBody)],
+    mut diagnostics: Vec<Diagnostic>,
+    file_id: FileId,
+) -> CompileOutput {
     // Reject types with no codegen representation yet (128-bit ints,
     // str/enum/tuple — most are already diagnosed in MIR).
-    for (_, mir) in &mirs {
+    for (_, mir) in mirs {
         for l in &mir.locals {
             if unsupported_ty(&l.ty, items) {
                 diagnostics.push(Diagnostic::error(
@@ -94,7 +126,7 @@ pub fn compile_file(db: &dyn Db, file: SourceFile) -> CompileOutput {
         };
     }
 
-    match emit::emit_object(items, &mirs) {
+    match emit::emit_object(items, mirs) {
         Ok(e) => CompileOutput {
             object: Some(e.object),
             diagnostics,

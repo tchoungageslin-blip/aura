@@ -9,7 +9,7 @@
 use aura_ast::{Item, TypeExpr, TypeExprId};
 use aura_parser::ParsedFile;
 
-use crate::{Db, SourceFile, parsed};
+use crate::{Db, Project, SourceFile, parsed};
 
 /// A syntactic type with names resolved to text and no positions.
 /// Conversion happens once in `file_items`; semantic lowering maps
@@ -233,5 +233,50 @@ fn fn_sig(ast: &aura_ast::Ast, rodeo: &lasso::Rodeo, f: &aura_ast::FnDef) -> Ite
             .collect(),
         ret: f.ret.map(|r| TypeName::from_ast(ast, rodeo, r)),
         is_extern: f.is_extern,
+    }
+}
+
+// ----- project-level items ----------------------------------------------------
+
+/// The merged signature table of a whole [`Project`]: every file's
+/// [`ItemSig`]s concatenated in `project.files` order. Global indices
+/// into [`ProjectItems::merged`] are what `Def`, `Callee`, `StructLit`,
+/// and `EnumLit` payloads mean on the multi-file path — a `Def::Fn(i)`
+/// indexes `merged.items[i]` regardless of which file declared it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProjectItems {
+    /// All items across the project, in `files` order.
+    pub merged: FileItems,
+    /// `map[g] = (file, local item index)` — where global item `g` was
+    /// declared (bodies and spans live per-file).
+    pub map: Vec<(SourceFile, u32)>,
+}
+
+impl ProjectItems {
+    /// Global index → declaring `(file, local index)`.
+    #[must_use]
+    pub fn locate(&self, global: u32) -> Option<(SourceFile, u32)> {
+        self.map.get(global as usize).copied()
+    }
+}
+
+/// Merge every project file's signature tree into one table. Depends on
+/// each file's `file_items` — an edit inside one file's body re-runs
+/// nothing here (that file's `FileItems` backdates, so the merged table
+/// is unchanged and downstream project queries stay memoized).
+#[salsa::tracked(returns(ref))]
+pub fn project_items(db: &dyn Db, project: Project) -> ProjectItems {
+    let mut items = Vec::new();
+    let mut map = Vec::new();
+    for file in project.files(db) {
+        let fi = file_items(db, *file);
+        for (local, sig) in fi.items.iter().enumerate() {
+            map.push((*file, u32::try_from(local).unwrap_or(u32::MAX)));
+            items.push(sig.clone());
+        }
+    }
+    ProjectItems {
+        merged: FileItems { items },
+        map,
     }
 }
