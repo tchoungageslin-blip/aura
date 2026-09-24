@@ -137,6 +137,10 @@ const DOC_PAGES: &[(&str, &str)] = &[
         include_str!("../../../docs/src/effective-aura.md"),
     ),
     ("internals", include_str!("../../../docs/src/internals.md")),
+    (
+        "tutorials",
+        include_str!("../../../docs/src/tutorials/README.md"),
+    ),
 ];
 
 /// `aura doc [topic]` — print an embedded doc page, a builtin's entry,
