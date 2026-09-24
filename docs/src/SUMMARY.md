@@ -21,3 +21,4 @@
 - [Releasing](./releasing.md)
 - [Compiler Internals](./internals.md)
 - [The Megaplan](./megaplan.md)
+- [The Web Plan](./aura_web_plan.md)
