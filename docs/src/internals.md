@@ -21,11 +21,71 @@
 `aura-interp` is a parallel consumer: it walks `ParsedFile` directly
 after semantic checking and must produce identical observable behavior.
 
+## Lexer (`aura-lexer`)
+
+- Single pass over bytes; emits `Vec<Token>` where identifiers,
+  keywords and cooked strings are `lasso::Spur`s into a `Rodeo`
+  interner **owned by `LexedFile`** — nothing leaks, which matters
+  because the same interner pattern lives inside the long-running LSP
+  process.
+- `\n` produces a `Newline` token; the parser's ASI rules decide when
+  it ends a statement (never inside `()`/`{}`/`[]` or after an
+  operator/comma).
+- String literals are *cooked* during lexing (escapes resolved), so
+  downstream passes see final bytes.
+- All malformed input yields `E000x` diagnostics, never a panic.
+
+## Parser (`aura-parser`)
+
+- Iterative **Pratt** (binding-power) expression parser: `infix_bp`
+  gives each operator `(l_bp, r_bp)`; right-associative `=` uses
+  `r_bp == l_bp`, everything else is left-associative.
+- **Panic-mode recovery**: on an error the parser emits a diagnostic,
+  synchronizes at the next statement boundary, and inserts an
+  `Expr::Error` placeholder so checking can continue.
+- `MAX_DEPTH` guards against pathological nesting (E1007) — iterative
+  or not, a hostile `((((…` input can't overflow the stack.
+- Struct literals are contextually banned in expression-head position
+  (`if S{..}.f == …`), resolved by the same trick Rust uses.
+
+## Semantic (`aura-semantic`)
+
+- Two passes: `resolve` builds a `Def` table (functions, structs,
+  enum variants, builtins `Ok`/`Err`, prelude builtins), then `typeck`
+  runs **bidirectional inference** over each body.
+- `InferCtx` is a union-find over type variables tagged by
+  `VarKind::{Int, Float, Any}`; unresolved vars render as
+  `{integer}`/`{float}`/`{unknown}` in diagnostics — never internal
+  `?v0` names.
+- `Type::Never` (`!`) unifies with everything, so `exit(1)` and
+  diverging branches type-check anywhere.
+
+## MIR and ARC (`aura-mir`)
+
+- Bodies lower to basic blocks over operands; aggregates move through
+  the `{tag, payload}` / `{ptr, len(, cap)}` layouts described below.
+- ARC scaffolding exists: `incRef`/`decRef` operations are represented
+  in MIR, and `unsafe { }` blocks are exempt from injection — the
+  escape hatch for manual memory work in a later phase.
+
 ## Salsa discipline
 
 - AST nodes never hold `String`/`&str` — interned `Spur`s only.
 - Tracked results never contain `HashMap`/`HashSet` — `IndexMap` or
   sorted `Vec` keep iteration deterministic.
+- Early-cutoff: editing a function body doesn't re-typecheck
+  unchanged callers (proven by a dedicated salsa test).
+
+## Codegen and linking
+
+- `aura-codegen` drives Cranelift: one module per compile, aggregates
+  via sret, `i128` constants built with `iconcat`, division/remainder
+  lower to raw `sdiv`/`udiv`/`srem`/`urem` — a zero divisor or
+  `MIN / -1` is a hardware trap, not a checked exit.
+- `aura-linker` abstracts `lld-link` (Windows), `mold` (Linux) and a
+  generic `ld` fallback; on Windows it searches the bundled
+  `lld-link.exe` beside `aura.exe` first, then PATH, then Rust
+  toolchains.
 
 ## Multi-file
 

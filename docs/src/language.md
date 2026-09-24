@@ -91,8 +91,10 @@ except `=`, which is right-associative.
 | 1 | `=` (assignment — statement, not an expression value) |
 
 Arithmetic on `vec`/`str`/`struct` operands is rejected; `str` supports
-`+` and `==`/`!=` only. Integer division by zero is a runtime trap
-(exit 101); signed `iN::MIN / -1` overflows likewise.
+`+` and `==`/`!=` only. Integer division or `%` by zero aborts the
+process — `aura interp` reports a clean "division by zero" while
+compiled code takes a hardware trap; bounds checks on
+`vec_get`/`str_get` exit 101 in both modes.
 
 ## Structs
 
