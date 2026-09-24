@@ -8,7 +8,7 @@
 ; (defaults match the values below so plain `iscc aura.iss` works too)
 
 #ifndef Version
-  #define Version "0.1.0-alpha"
+  #define Version "0.1.1-alpha"
 #endif
 #ifndef DistDir
   #define DistDir "..\dist\aura-" + Version + "-x86_64-pc-windows-msvc"

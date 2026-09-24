@@ -120,7 +120,7 @@ dependencies = [
 
 [[package]]
 name = "aura-ast"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "aura-common",
  "lasso",
@@ -128,7 +128,7 @@ dependencies = [
 
 [[package]]
 name = "aura-cli"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "aura-codegen",
  "aura-common",
@@ -148,7 +148,7 @@ dependencies = [
 
 [[package]]
 name = "aura-codegen"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "aura-ast",
  "aura-common",
@@ -167,7 +167,7 @@ dependencies = [
 
 [[package]]
 name = "aura-common"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "ariadne",
  "insta",
@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "aura-fmt"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "aura-ast",
  "aura-common",
@@ -186,7 +186,7 @@ dependencies = [
 
 [[package]]
 name = "aura-hir"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "aura-ast",
  "aura-common",
@@ -198,7 +198,7 @@ dependencies = [
 
 [[package]]
 name = "aura-interp"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "aura-ast",
  "aura-common",
@@ -211,7 +211,7 @@ dependencies = [
 
 [[package]]
 name = "aura-lexer"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "aura-common",
  "insta",
@@ -221,7 +221,7 @@ dependencies = [
 
 [[package]]
 name = "aura-linker"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "aura-common",
  "thiserror",
@@ -229,7 +229,7 @@ dependencies = [
 
 [[package]]
 name = "aura-lsp"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "async-lsp",
  "aura-ast",
@@ -250,7 +250,7 @@ dependencies = [
 
 [[package]]
 name = "aura-mir"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "aura-ast",
  "aura-common",
@@ -265,7 +265,7 @@ dependencies = [
 
 [[package]]
 name = "aura-parser"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "aura-ast",
  "aura-common",
@@ -276,7 +276,7 @@ dependencies = [
 
 [[package]]
 name = "aura-project"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "aura-common",
  "insta",
@@ -286,7 +286,7 @@ dependencies = [
 
 [[package]]
 name = "aura-salsa-db"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "aura-ast",
  "aura-common",
@@ -300,7 +300,7 @@ dependencies = [
 
 [[package]]
 name = "aura-semantic"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "aura-ast",
  "aura-common",
