@@ -109,6 +109,70 @@ impl BuiltinFn {
         Self::F64FromInt,
     ];
 
+    /// Look up a builtin by its source-level name (`vec_push`, …).
+    pub fn by_name(name: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|b| b.name() == name)
+    }
+
+    /// One-line signature + short doc, for `aura doc` and LSP hover.
+    /// Single source of truth — keep in sync with the doc comments.
+    pub fn doc(self) -> &'static str {
+        match self {
+            Self::Print => "print(s: str)\nWrite `s` to stdout.",
+            Self::Println => "println(s: str)\nWrite `s` + newline to stdout.",
+            Self::Eprint => "eprint(s: str)\nWrite `s` to stderr.",
+            Self::Eprintln => "eprintln(s: str)\nWrite `s` + newline to stderr.",
+            Self::Exit => "exit(code: i64) -> !\nTerminate the process with `code`.",
+            Self::Sqrt => "sqrt(x: f64) -> f64\nSquare root.",
+            Self::StrFromInt => {
+                "str_from_int(n) -> str\nDecimal rendering of an integer (any int width)."
+            }
+            Self::StrFromBool => "str_from_bool(b: bool) -> str\n\"true\" / \"false\".",
+            Self::StrGet => {
+                "str_get(s: str, i) -> i64\nByte at index `i` (0-255). Exits 101 if out of bounds."
+            }
+            Self::StrSlice => {
+                "str_slice(s: str, lo, hi) -> str\nBytes `lo..hi` as a view — no copy. Exits 101 on a bad range."
+            }
+            Self::VecNew => {
+                "vec_new<T>() -> vec<T>\nEmpty vector; T inferred from first use — annotate when empty."
+            }
+            Self::VecPush => {
+                "vec_push<T>(v: vec<T>, x: T)\nAppend `x`, doubling capacity as needed."
+            }
+            Self::VecGet => {
+                "vec_get<T>(v: vec<T>, i: usize) -> T\nBounds-checked load. Exits 101 if out of bounds."
+            }
+            Self::VecSet => {
+                "vec_set<T>(v: vec<T>, i: usize, x: T)\nBounds-checked store. Exits 101 if out of bounds."
+            }
+            Self::VecPop => {
+                "vec_pop<T>(v: vec<T>) -> T\nRemove + return the last element. Exits 101 on empty."
+            }
+            Self::Args => "args() -> vec<str>\nCommand-line arguments, program name first.",
+            Self::Env => "env(name: str) -> str\nEnvironment variable value, or \"\" when unset.",
+            Self::ReadFile => {
+                "read_file(path: str) -> Result<str, str>\nWhole file contents; Err(msg) on OS failure."
+            }
+            Self::WriteFile => {
+                "write_file(path: str, data: str) -> Result<bool, str>\nCreate/truncate and write; Ok(true) on success."
+            }
+            Self::ReadStdin => "read_stdin() -> str\nAll of stdin until EOF.",
+            Self::Exec => {
+                "exec(cmd: str) -> i64\nSpawn a program (whitespace-split args, no shell), wait, return its exit code. -1 if spawn fails."
+            }
+            Self::StrFromByte => {
+                "str_from_byte(b) -> str\nOne-byte string from the low 8 bits of `b`."
+            }
+            Self::StrFromFloat => {
+                "str_from_f64(x: f64) -> str\nFixed %.6f formatting: 3.5 -> \"3.500000\", -0.0 -> \"-0.000000\", huge -> \"inf\", NaN -> \"nan\"."
+            }
+            Self::F64FromInt => {
+                "f64_from_int(n) -> f64\nSigned integer to f64 conversion (any int width)."
+            }
+        }
+    }
+
     /// Source-level name (`println`, `exit`, `vec_push`, …).
     pub fn name(self) -> &'static str {
         match self {

@@ -486,6 +486,36 @@ fn run_nbody_returns_0() {
 }
 
 #[test]
+fn doc_builtin_and_ecode() {
+    // `aura doc` answers offline for builtins and error codes.
+    let out = aura(&["doc", "vec_push"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success() && stdout.contains("vec_push"),
+        "stdout: {stdout}"
+    );
+
+    let out = aura(&["doc", "E2101"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success() && stdout.contains("requires `else`"),
+        "stdout: {stdout}"
+    );
+
+    // Unknown topics fail cleanly.
+    let out = aura(&["doc", "nonexistent_builtin_xyz"]);
+    assert_eq!(out.status.code(), Some(1));
+
+    // `aura doc` lists topics.
+    let out = aura(&["doc"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success() && stdout.contains("stdlib"),
+        "stdout: {stdout}"
+    );
+}
+
+#[test]
 fn new_scaffolds_runnable_project() {
     // `aura new` must produce a project `aura run` accepts out of the box.
     let dir = std::env::temp_dir().join(format!("aura-e2e-new-{}", std::process::id()));
@@ -495,7 +525,11 @@ fn new_scaffolds_runnable_project() {
         .current_dir(&dir)
         .output()
         .expect("spawn aura");
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(dir.join("demo/aura.toml").is_file());
     assert!(dir.join("demo/src/main.aura").is_file());
     // Second `new` into a non-empty dir refuses.
@@ -512,7 +546,12 @@ fn new_scaffolds_runnable_project() {
         .output()
         .expect("spawn aura");
     let _ = std::fs::remove_dir_all(&dir);
-    assert_eq!(run.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        run.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
     assert!(String::from_utf8_lossy(&run.stdout).contains("Hello, Aura!"));
 }
 

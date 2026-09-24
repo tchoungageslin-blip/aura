@@ -39,6 +39,14 @@ enum Command {
         /// Project/directory name to create.
         name: PathBuf,
     },
+    /// Print embedded documentation: a topic page, a builtin name,
+    /// or an error code (`aura doc E2101`). Works offline.
+    Doc {
+        /// Topic, builtin name, or E-code (default: list topics).
+        topic: Option<String>,
+    },
+    /// Open the Aura documentation (installed docs dir, else the site).
+    Docs,
     /// Compile and link a file or project into an executable.
     Build {
         path: Option<PathBuf>,
@@ -88,6 +96,8 @@ fn main() -> ExitCode {
     let or_cwd = |p: Option<PathBuf>| p.unwrap_or_else(|| PathBuf::from("."));
     match cli.command {
         Command::New { name } => new(&name),
+        Command::Doc { topic } => doc(topic.as_deref()),
+        Command::Docs => docs(),
         Command::Check { path } => check(&or_cwd(path)),
         Command::Parse { path } => parse(&or_cwd(path)),
         Command::Mir { path } => mir(&or_cwd(path)),
@@ -105,20 +115,104 @@ fn main() -> ExitCode {
     }
 }
 
+/// Documentation pages embedded into the binary — offline docs for
+/// `aura doc`. The same files feed the website's mdBook build, so the
+/// CLI can never drift from the published docs.
+const DOC_PAGES: &[(&str, &str)] = &[
+    ("intro", include_str!("../../../docs/src/intro.md")),
+    (
+        "getting-started",
+        include_str!("../../../docs/src/getting-started.md"),
+    ),
+    ("language", include_str!("../../../docs/src/language.md")),
+    ("toolchain", include_str!("../../../docs/src/toolchain.md")),
+    ("stdlib", include_str!("../../../docs/src/stdlib.md")),
+    ("errors", include_str!("../../../docs/src/errors.md")),
+    ("internals", include_str!("../../../docs/src/internals.md")),
+];
+
+/// `aura doc [topic]` — print an embedded doc page, a builtin's entry,
+/// or an error-code explanation. `aura doc` alone lists topics.
+fn doc(topic: Option<&str>) -> ExitCode {
+    let Some(topic) = topic else {
+        println!("Aura documentation topics:");
+        for (name, _) in DOC_PAGES {
+            println!("  {name}");
+        }
+        println!("\n`aura doc <topic>` · `aura doc vec_push` · `aura doc E2101`");
+        return ExitCode::SUCCESS;
+    };
+    // Error codes: `aura doc E2101` → the `### E2101` section.
+    let t = topic.to_ascii_uppercase();
+    if t.len() == 5 && t.starts_with('E') && t[1..].chars().all(|c| c.is_ascii_digit()) {
+        let errors = DOC_PAGES.iter().find(|(n, _)| *n == "errors").unwrap().1;
+        let head = format!("### {t}");
+        if let Some(start) = errors.find(&head) {
+            let rest = &errors[start..];
+            let end = rest[4..]
+                .find("\n### ")
+                .map(|i| i + 4)
+                .or_else(|| rest.find("\n## "))
+                .unwrap_or(rest.len());
+            print!("{}", rest[..end].trim_end());
+            println!();
+            return ExitCode::SUCCESS;
+        }
+        eprintln!("error: no such error code `{t}` — see `aura doc errors`");
+        return ExitCode::from(1);
+    }
+    // Page name → the whole page.
+    if let Some((_, page)) = DOC_PAGES.iter().find(|(n, _)| *n == topic) {
+        print!("{}", page.trim_end());
+        println!();
+        return ExitCode::SUCCESS;
+    }
+    // Builtin name → its canonical doc from aura_common::BuiltinFn.
+    if let Some(b) = aura_common::BuiltinFn::by_name(topic) {
+        println!("```aura\n{}\n```", b.doc());
+        return ExitCode::SUCCESS;
+    }
+    eprintln!("error: no doc topic or builtin `{topic}` — see `aura doc`");
+    ExitCode::from(1)
+}
+
+/// `aura docs` — open the installed docs dir (Inno layout), else the
+/// bundled markdown dir, else the website.
+fn docs() -> ExitCode {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(std::path::Path::to_path_buf));
+    if let Some(d) = exe_dir {
+        for cand in [d.join("docs"), d.join("docs/html")] {
+            if cand.is_dir() {
+                let _ = std::process::Command::new("cmd")
+                    .args(["/c", "start", "", &cand.display().to_string()])
+                    .spawn();
+                println!("opened {}", cand.display());
+                return ExitCode::SUCCESS;
+            }
+        }
+    }
+    println!("Docs: https://aura-lang.github.io/aura — or `aura doc <topic>` offline.");
+    let _ = std::process::Command::new("cmd")
+        .args(["/c", "start", "", "https://aura-lang.github.io/aura"])
+        .spawn();
+    ExitCode::SUCCESS
+}
+
 /// `aura new <name>` — scaffold `name/aura.toml` + `name/src/main.aura`.
 fn new(name: &Path) -> ExitCode {
     let dir = name;
-    let pkg = dir
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or_default();
+    let pkg = dir.file_name().and_then(|n| n.to_str()).unwrap_or_default();
     let valid = !pkg.is_empty()
         && pkg
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
         && pkg.chars().next().is_some_and(|c| c.is_ascii_alphabetic());
     if !valid {
-        eprintln!("error: invalid package name `{pkg}` (letters, digits, `_`, `-`; must start with a letter)");
+        eprintln!(
+            "error: invalid package name `{pkg}` (letters, digits, `_`, `-`; must start with a letter)"
+        );
         return ExitCode::from(1);
     }
     if dir.exists() && dir.read_dir().is_ok_and(|mut d| d.next().is_some()) {

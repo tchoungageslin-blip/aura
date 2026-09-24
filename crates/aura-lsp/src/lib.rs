@@ -334,8 +334,20 @@ impl ServerState {
 // ----- feature implementations --------------------------------------------------
 
 /// `textDocument/hover`: the inferred type of the smallest expression whose
-/// span contains `offset`.
+/// span contains `offset`. Builtins answer with their signature + doc.
 fn hover_at(db: &AuraDatabase, doc: &Document, offset: u32) -> Option<Hover> {
+    // Builtin under the cursor → signature + doc (Def::Builtin carries it).
+    if let Some((_, name)) = name_at(db, doc, offset)
+        && let Some(aura_semantic::Def::Builtin(b)) = resolved_file(db, doc.input).lookup(&name)
+    {
+        return Some(Hover {
+            contents: HoverContents::Scalar(MarkedString::String(format!(
+                "```aura\n{}\n```",
+                b.doc()
+            ))),
+            range: None,
+        });
+    }
     let item = enclosing_fn(db, doc, offset)?;
     let body = fn_body(db, doc.input, item).as_ref()?;
     let types = typeck_fn(db, doc.input, item).as_ref()?;
