@@ -34,26 +34,53 @@ Full strategy: `docs/megaplan.md`. This file tracks what is done.
 - `aura-runtime`: `staticlib`, `extern "C"` fixed-signature exports
 - `aura run examples/hello.aura` prints `Hello, World!`
 
-## Planned (not started)
-
 ### Phase 4 — Structs, enums, FFI
-struct decls/instantiation/field access, C-compatible layout; enums +
-exhaustive `match`; built-in monomorphized `Result<T,E>` + `?`;
-`extern "C"` blocks + `unsafe` (no ARC inside unsafe).
+- struct decls/instantiation/field access + assignment, C-compatible layout
+- enums + `match`; built-in `Result<T,E>` + `?`
+- `extern "C"` decls + `unsafe`; `*const/*mut T` pointers
+- `str` (`{ptr,len}`, `+`, `==`, `.len`/`.ptr`); `vec<T>` (`{ptr,len,cap}`,
+  inline in aggregates, doubling growth, `vec_get/set/push/pop`)
 
 ### Phase 5 — Tooling
-`aura fmt` (4sp indent, 100col, idempotent); `aura lsp` via async-lsp
-(diagnostics, hover, completion, definition, references, semanticTokens);
-VS Code extension (TextMate grammar + LSP client).
+- `aura fmt` (4sp indent, 100col, idempotent)
+- `aura lsp` via async-lsp + VS Code extension
 
 ### Phase 6 — Hardening
-cargo-fuzz targets (lexer/parser/semantic/codegen/e2e differential vs
-reference interpreter `aura-interp`); stdlib (`io`, `string`, `vec`,
-`process`, `env`); `aura.toml` manifests + local path deps.
+- cargo-fuzz targets; `aura-interp` reference interpreter (256 MB scoped
+  stack for deep recursion; `RunConfig` injects stdin/cwd/argv)
+- stdlib builtins: `str_from_int/bool/byte/f64` (`%.6f` exact),
+  `f64_from_int`, `str_get/str_slice`, `vec_*`, `read_file`/`write_file`,
+  `read_stdin`, `exec`, `args`, `env`, `sqrt`, `exit`
+- `aura.toml` manifests + local path deps (flat alpha namespace)
+- i128/u128 literals + arithmetic (constants via `iconcat`; E0004 on
+  u128 overflow)
 
 ### Phase 7 — Release
-benchmark suite (n-body, binary-trees, fib, strings; hyperfine vs C −O2 ±15%);
-mdBook docs; 0.1.0-alpha binaries for linux x86_64/aarch64 + windows x86_64.
+- `aura bench` (compiled-vs-interp timing); `bench/` suite: fib, strings,
+  bintree, nbody (compiled ~10–70× faster than interp)
+- mdBook docs in `docs/`; `scripts/package-dist.sh` → verified
+  `dist/aura-0.1.0-alpha-windows-x86_64/`
+- Blocked by environment: linux x86_64/aarch64 binaries (no linux
+  linker on this host), hyperfine-vs-C (no hyperfine/C toolchain)
+
+### Validation ladder — `aura test` (50/50)
+Progressive scenario corpus in `testsuite/`, run by `aura test` —
+compiled and interpreted engines must agree byte-for-byte on stdout and
+exit code; side effects isolated in a temp workdir copy; stop at first
+failure; every fix adds a permanent regression test.
+
+- L1 01–10 foundations (incl. i128 codegen — was E3004)
+- L2 11–20 algorithms (added `str_get`/`str_slice`/`vec_pop`)
+- L3 21–28 system: files, stdin, exec, env, args, copy, miniapp
+  (added file/process builtins + `str_from_byte`; interp `RunConfig`)
+- L4 29–35 performance (added `str_from_f64` `%.6f`, `f64_from_int`,
+  scientific-notation literals)
+- L5 36–40 scientific (integration, stats, Monte Carlo, linalg, iterates)
+- L6 41–45 real apps (JSON parser, CLI, KV store, log processor,
+  template engine; fixed no-else `if` with unit/Never tails)
+- L7 46–48 multi-file `aura.toml` projects + path deps
+- L8 49–50 regression corpus + determinism gate (fixed silent u64
+  clamp on big literals — widened to u128)
 
 ## Engineering invariants (from megaplan — do not regress)
 
