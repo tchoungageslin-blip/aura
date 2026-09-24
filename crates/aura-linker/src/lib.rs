@@ -115,9 +115,25 @@ impl LldLink {
         None
     }
 
+    /// `lld-link.exe` bundled next to the running executable — the
+    /// distribution layout. Checked first: the bundled copy is the exact
+    /// version the release was tested with, and it lets `aura build` work
+    /// on machines without a Rust toolchain.
+    pub fn from_exe_dir() -> Option<Self> {
+        let exe = std::env::current_exe().ok()?;
+        Self::from_dir(exe.parent()?)
+    }
+
+    /// `lld-link.exe` inside `dir`, if present.
+    fn from_dir(dir: &Path) -> Option<Self> {
+        let candidate = dir.join("lld-link.exe");
+        candidate.is_file().then_some(Self { path: candidate })
+    }
+
     /// Any working `lld-link`.
     pub fn find() -> Option<Self> {
-        Self::from_toolchain()
+        Self::from_exe_dir()
+            .or_else(Self::from_toolchain)
             .or_else(Self::from_path)
             .or_else(Self::from_rustup_dir)
     }
@@ -441,5 +457,18 @@ mod tests {
     fn lld_link_found_on_this_machine() {
         // The dev image ships lld-link inside the Rust toolchain.
         assert!(LldLink::find().is_some());
+    }
+
+    #[test]
+    fn lld_link_bundled_beside_exe() {
+        // Dist layout: lld-link.exe ships next to aura.exe so `aura build`
+        // works on machines with no Rust toolchain.
+        let dir = std::env::temp_dir().join(format!("aura-lld-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(LldLink::from_dir(&dir).is_none());
+        let bundled = dir.join("lld-link.exe");
+        std::fs::write(&bundled, b"stub").unwrap();
+        assert_eq!(LldLink::from_dir(&dir).unwrap().path(), &bundled);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
