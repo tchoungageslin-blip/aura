@@ -518,6 +518,10 @@ fn doc_builtin_and_ecode() {
 #[test]
 fn new_scaffolds_runnable_project() {
     // `aura new` must produce a project `aura run` accepts out of the box.
+    // `run` compiles+links natively — needs aura_runtime.lib (self-built).
+    if runtime_lib().is_none() {
+        return;
+    }
     let dir = std::env::temp_dir().join(format!("aura-e2e-new-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let out = Command::new(AURA)
@@ -539,7 +543,7 @@ fn new_scaffolds_runnable_project() {
         .output()
         .expect("spawn aura");
     assert_eq!(again.status.code(), Some(1));
-    // The scaffold interprets cleanly (no linker needed).
+    // The scaffold compiles, links and runs out of the box.
     let run = Command::new(AURA)
         .args(["run"])
         .current_dir(dir.join("demo"))
