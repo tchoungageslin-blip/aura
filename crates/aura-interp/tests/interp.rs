@@ -394,3 +394,23 @@ fn str_from_byte_builds_bytes() {
     let src = "fn main() -> i64 { let s = str_from_byte(72) + str_from_byte(105)\n if s == \"Hi\" && s.len == 2 { 4 } else { 0 } }";
     assert_eq!(run(src), 4);
 }
+
+#[test]
+fn str_from_f64_formats() {
+    // %.6f with exact rounding — parity contract with the runtime.
+    // `0.0 - 0.0` is +0.0 (IEEE); a real -0.0 needs `0.0 * -1.0`.
+    let src = "fn main() -> i64 { println(str_from_f64(3.14159265))\n println(str_from_f64(0.9999999))\n println(str_from_f64(0.0 * (0.0 - 1.0)))\n println(str_from_f64(1e20))\n 0 }";
+    let parsed = aura_parser::parse_file(src, aura_common::FileId(0));
+    let c = run_parsed_capture(&parsed, RunConfig::default());
+    assert_eq!(c.result.unwrap(), 0);
+    assert_eq!(
+        String::from_utf8(c.stdout).unwrap(),
+        "3.141593\n1.000000\n-0.000000\n100000000000000000000.000000\n"
+    );
+}
+
+#[test]
+fn f64_from_int_converts() {
+    let src = "fn main() -> i64 { let n: usize = 16\n if sqrt(f64_from_int(n)) == 4.0 && str_from_f64(f64_from_int(0 - 7)) == \"-7.000000\" { 5 } else { 0 } }";
+    assert_eq!(run(src), 5);
+}

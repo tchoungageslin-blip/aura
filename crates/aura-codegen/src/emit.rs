@@ -244,6 +244,11 @@ fn declare_builtins(
                 sig.params
                     .extend([AbiParam::new(types::I64), AbiParam::new(ptr)]);
             }
+            // (v: f64, out: *mut {ptr,len})
+            BuiltinFn::StrFromFloat => {
+                sig.params
+                    .extend([AbiParam::new(types::F64), AbiParam::new(ptr)]);
+            }
             // (ptr, len, idx) -> u8 — bounds-checked byte load.
             BuiltinFn::StrGet => {
                 sig.params.extend([AbiParam::new(ptr); 3]);
@@ -280,7 +285,7 @@ fn declare_builtins(
                 sig.params.extend([AbiParam::new(ptr); 2]);
                 sig.returns.push(AbiParam::new(types::I64));
             }
-            BuiltinFn::VecNew | BuiltinFn::VecSet | BuiltinFn::VecPop => {
+            BuiltinFn::VecNew | BuiltinFn::VecSet | BuiltinFn::VecPop | BuiltinFn::F64FromInt => {
                 unreachable!()
             }
         }
@@ -811,6 +816,29 @@ impl FnGen<'_, '_> {
                 };
                 let da = self.place_addr(dest);
                 self.call_builtin_sym(b, &[v, da]);
+            }
+            BuiltinFn::StrFromFloat => {
+                // (v: f64, out) — scalar arg, aggregate out.
+                let Some(op) = args.first() else { return };
+                let v = self.operand_val(op);
+                let da = self.place_addr(dest);
+                self.call_builtin_sym(b, &[v, da]);
+            }
+            BuiltinFn::F64FromInt => {
+                // Inline. Contract: the value converts via signed i64
+                // (`fcvt_from_sint`) — u64/usize values ≥ 2^63 wrap,
+                // same as interp's `v as i64 as f64`. i128 truncates
+                // to i64 first (ireduce), matching interp exactly.
+                let Some(op) = args.first() else { return };
+                let mut v = self.operand_val(op);
+                let cur = self.b.func.dfg.value_type(v);
+                if cur == types::I128 {
+                    v = self.b.ins().ireduce(types::I64, v);
+                } else if cur != types::I64 {
+                    v = self.b.ins().sextend(types::I64, v);
+                }
+                let f = self.b.ins().fcvt_from_sint(types::F64, v);
+                self.store(dest, f);
             }
             BuiltinFn::StrGet | BuiltinFn::StrSlice => self.str_get_slice(dest, b, args),
             BuiltinFn::VecNew => {

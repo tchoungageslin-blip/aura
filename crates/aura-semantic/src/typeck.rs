@@ -1196,6 +1196,18 @@ fn builtin_fn_type(infer: &mut InferCtx, b: BuiltinFn) -> Type {
                 ret: Box::new(Type::Str),
             }
         }
+        BuiltinFn::StrFromFloat => Type::Fn {
+            params: vec![Type::Float(FloatTy::F64)],
+            ret: Box::new(Type::Str),
+        },
+        BuiltinFn::F64FromInt => {
+            // Generic over int widths — the value converts to f64.
+            let t = infer.new_var(VarKind::Int);
+            Type::Fn {
+                params: vec![t],
+                ret: Box::new(Type::Float(FloatTy::F64)),
+            }
+        }
         BuiltinFn::StrGet => Type::Fn {
             params: vec![Type::Str, Type::Int(IntTy::Usize)],
             ret: Box::new(Type::Int(IntTy::I64)),
@@ -1204,40 +1216,11 @@ fn builtin_fn_type(infer: &mut InferCtx, b: BuiltinFn) -> Type {
             params: vec![Type::Str, Type::Int(IntTy::Usize), Type::Int(IntTy::Usize)],
             ret: Box::new(Type::Str),
         },
-        BuiltinFn::VecNew => {
-            let t = infer.new_var(VarKind::Any);
-            Type::Fn {
-                params: Vec::new(),
-                ret: Box::new(Type::Vec(Box::new(t))),
-            }
-        }
-        BuiltinFn::VecPush | BuiltinFn::VecSet => {
-            let t = infer.new_var(VarKind::Any);
-            let v = Type::Vec(Box::new(t.clone()));
-            let params = if matches!(b, BuiltinFn::VecPush) {
-                vec![v, t]
-            } else {
-                vec![v, Type::Int(IntTy::Usize), t]
-            };
-            Type::Fn {
-                params,
-                ret: Box::new(Type::Unit),
-            }
-        }
-        BuiltinFn::VecGet => {
-            let t = infer.new_var(VarKind::Any);
-            Type::Fn {
-                params: vec![Type::Vec(Box::new(t.clone())), Type::Int(IntTy::Usize)],
-                ret: Box::new(t),
-            }
-        }
-        BuiltinFn::VecPop => {
-            let t = infer.new_var(VarKind::Any);
-            Type::Fn {
-                params: vec![Type::Vec(Box::new(t.clone()))],
-                ret: Box::new(t),
-            }
-        }
+        BuiltinFn::VecNew
+        | BuiltinFn::VecPush
+        | BuiltinFn::VecSet
+        | BuiltinFn::VecGet
+        | BuiltinFn::VecPop => vec_fn_type(infer, b),
         BuiltinFn::Args => Type::Fn {
             params: Vec::new(),
             ret: Box::new(Type::Vec(Box::new(Type::Str))),
@@ -1262,6 +1245,36 @@ fn builtin_fn_type(infer: &mut InferCtx, b: BuiltinFn) -> Type {
             params: vec![Type::Str],
             ret: Box::new(Type::Str),
         },
+    }
+}
+
+/// `vec<T>` builtin signatures — each gets a fresh inference var for
+/// the element type, pinned down by usage.
+fn vec_fn_type(infer: &mut InferCtx, b: BuiltinFn) -> Type {
+    let t = infer.new_var(VarKind::Any);
+    let v = Type::Vec(Box::new(t.clone()));
+    match b {
+        BuiltinFn::VecNew => Type::Fn {
+            params: Vec::new(),
+            ret: Box::new(v),
+        },
+        BuiltinFn::VecPush => Type::Fn {
+            params: vec![v, t],
+            ret: Box::new(Type::Unit),
+        },
+        BuiltinFn::VecSet => Type::Fn {
+            params: vec![v, Type::Int(IntTy::Usize), t],
+            ret: Box::new(Type::Unit),
+        },
+        BuiltinFn::VecGet | BuiltinFn::VecPop => Type::Fn {
+            params: if matches!(b, BuiltinFn::VecGet) {
+                vec![v, Type::Int(IntTy::Usize)]
+            } else {
+                vec![v]
+            },
+            ret: Box::new(t),
+        },
+        _ => unreachable!(),
     }
 }
 

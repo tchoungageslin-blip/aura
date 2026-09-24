@@ -1,0 +1,25 @@
+// 31-perf-string — string build/slice/get churn.
+fn main() -> i64 {
+    // build a 10k-byte string
+    let mut s = ""
+    let mut i = 0
+    while i < 10000 {
+        s = s + str_from_byte(97 + i % 26)
+        i = i + 1
+    }
+    if s.len != 10000 { return 1 }
+    // checksum all bytes
+    let mut sum = 0
+    let mut j = 0
+    while j < s.len {
+        sum = sum + str_get(s, j)
+        j = j + 1
+    }
+    // 10000 bytes: avg byte = 97+12.5 rounded pattern -> exact: each
+    // letter appears either 384 or 385 times
+    println(str_from_int(sum))
+    // slice out a window
+    if str_slice(s, 26, 52) != str_slice(s, 0, 26) { return 2 }
+    println("string ok")
+    return 0
+}

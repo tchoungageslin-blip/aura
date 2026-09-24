@@ -349,6 +349,8 @@ enum Builtin {
     StrGet,
     StrSlice,
     StrFromByte,
+    StrFromFloat,
+    F64FromInt,
 }
 
 /// The interpreter: item tables plus a scope stack and fuel.
@@ -402,6 +404,33 @@ pub struct RunConfig {
     /// `args()` result: `Some` = harness argv (program name included at
     /// [0]); `None` = the real process argv.
     pub args: Option<Vec<String>>,
+}
+
+/// `f64_from_int` — the signed-i64 conversion contract: `v as i64`
+/// truncates like codegen's `ireduce`, `as f64` is `fcvt_from_sint`.
+/// Precision loss above 2^53 is inherent to f64.
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+fn f64_from_int(v: i128) -> f64 {
+    v as i64 as f64
+}
+
+/// `str_from_f64` — `%.6f` fixed notation. Rust's `{:.6}` rounds the
+/// exact decimal value correctly (dyadic f64s never hit a `.6f` tie),
+/// matching the runtime's exact u128 fixed-point implementation.
+/// `nan`/`±inf` mirror the runtime contract, including the
+/// |x| ≥ 1e38 bound.
+fn fmt_f64(v: f64) -> Vec<u8> {
+    if v.is_nan() {
+        b"nan".to_vec()
+    } else if v.abs() >= 1e38 || v.is_infinite() {
+        if v.is_sign_negative() {
+            b"-inf".to_vec()
+        } else {
+            b"inf".to_vec()
+        }
+    } else {
+        format!("{v:.6}").into_bytes()
+    }
 }
 
 /// Resolve `path` against `cwd` — relative paths root at the scenario
@@ -1063,6 +1092,8 @@ impl Builtin {
             "str_get" => Some(Self::StrGet),
             "str_slice" => Some(Self::StrSlice),
             "str_from_byte" => Some(Self::StrFromByte),
+            "str_from_f64" => Some(Self::StrFromFloat),
+            "f64_from_int" => Some(Self::F64FromInt),
             "vec_pop" => Some(Self::VecPop),
             "read_file" => Some(Self::ReadFile),
             "write_file" => Some(Self::WriteFile),
@@ -1164,6 +1195,8 @@ impl Builtin {
             }))),
             // Low 8 bits of the i128 — the byte value.
             (Self::StrFromByte, [Value::Int(v)]) => Ok(Value::Str(Rc::from([v.to_le_bytes()[0]]))),
+            (Self::StrFromFloat, [Value::Float(x)]) => Ok(Value::Str(Rc::from(fmt_f64(*x)))),
+            (Self::F64FromInt, [Value::Int(v)]) => Ok(Value::Float(f64_from_int(*v))),
             (Self::StrGet, [Value::Str(s), Value::Int(i)]) => {
                 let i = usize::try_from(*i).unwrap_or(usize::MAX);
                 // Compiled OOB is ExitProcess(101) — match it.

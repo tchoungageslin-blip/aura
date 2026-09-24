@@ -71,6 +71,13 @@ pub enum BuiltinFn {
     /// `str_from_byte(b: i64) -> str` — the single-byte string for the
     /// low 8 bits; the primitive for building bytes programmatically.
     StrFromByte,
+    /// `str_from_f64(x: f64) -> str` — `%.6f` fixed notation with exact
+    /// rounding ("3.141593", "-0.000000"); `"nan"`/`"±inf"` for
+    /// non-finite or |x| ≥ 1e38.
+    StrFromFloat,
+    /// `f64_from_int(v) -> f64` — int→float conversion, generic over
+    /// int widths like `str_from_int`.
+    F64FromInt,
 }
 
 impl BuiltinFn {
@@ -98,6 +105,8 @@ impl BuiltinFn {
         Self::ReadStdin,
         Self::Exec,
         Self::StrFromByte,
+        Self::StrFromFloat,
+        Self::F64FromInt,
     ];
 
     /// Source-level name (`println`, `exit`, `vec_push`, …).
@@ -125,6 +134,8 @@ impl BuiltinFn {
             Self::ReadStdin => "read_stdin",
             Self::Exec => "exec",
             Self::StrFromByte => "str_from_byte",
+            Self::StrFromFloat => "str_from_f64",
+            Self::F64FromInt => "f64_from_int",
         }
     }
 
@@ -152,7 +163,8 @@ impl BuiltinFn {
             Self::ReadStdin => "aura_read_stdin",
             Self::Exec => "aura_exec",
             Self::StrFromByte => "aura_str_from_byte",
-            Self::VecNew | Self::VecSet | Self::VecPop => "",
+            Self::StrFromFloat => "aura_str_from_f64",
+            Self::VecNew | Self::VecSet | Self::VecPop | Self::F64FromInt => "",
         }
     }
 

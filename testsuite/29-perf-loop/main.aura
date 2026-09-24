@@ -1,0 +1,21 @@
+// 29-perf-loop — tight numeric loop: Newton sqrt + harmonic sum.
+fn main() -> i64 {
+    // Newton-iterate sqrt(2) 60 times -> converged value
+    let mut x = 1.0
+    let mut i = 0
+    while i < 60 {
+        x = (x + 2.0 / x) / 2.0
+        i = i + 1
+    }
+    println(str_from_f64(x))
+    // harmonic-ish sum, 200k terms
+    let mut s = 0.0
+    let mut k = 1.0
+    while k <= 200000.0 {
+        s = s + 1.0 / (k * k)
+        k = k + 1.0
+    }
+    println(str_from_f64(s))
+    println("loop ok")
+    return 0
+}

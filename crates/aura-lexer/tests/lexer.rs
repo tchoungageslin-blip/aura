@@ -96,6 +96,28 @@ fn float_literals() {
         kinds_no_eof("1..2"),
         vec![TokenKind::IntLit, TokenKind::DotDot, TokenKind::IntLit]
     );
+    // Scientific notation — `e`/`E` + optional sign + digits. Found by
+    // the testsuite: `1e20` used to lex as `1` + ident `e20`.
+    assert_eq!(
+        kinds_no_eof("1e20 1.5e-3 2E+7 0e0"),
+        vec![
+            TokenKind::FloatLit,
+            TokenKind::FloatLit,
+            TokenKind::FloatLit,
+            TokenKind::FloatLit
+        ]
+    );
+    // A bare `e` stays an identifier — `1e` is int + ident, not a
+    // malformed float.
+    assert_eq!(
+        kinds_no_eof("1e"),
+        vec![TokenKind::IntLit, TokenKind::Ident]
+    );
+    // `1ef` likewise — `e` doesn't eat letters.
+    assert_eq!(
+        kinds_no_eof("1ef"),
+        vec![TokenKind::IntLit, TokenKind::Ident]
+    );
 }
 
 #[test]

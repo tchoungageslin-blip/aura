@@ -1,0 +1,39 @@
+// 34-perf-matrix — 40x40 matmul + Frobenius norm via f64_from_int.
+fn main() -> i64 {
+    let n = 40
+    let a = vec_new()
+    let b = vec_new()
+    let c = vec_new()
+    let mut i = 0
+    while i < n * n {
+        vec_push(a, (i * 7 + 3) % 97)
+        vec_push(b, (i * 11 + 5) % 89)
+        vec_push(c, 0)
+        i = i + 1
+    }
+    let mut r = 0
+    while r < n {
+        let mut k = 0
+        while k < n {
+            let aik = vec_get(a, r * n + k)
+            let mut j = 0
+            while j < n {
+                vec_set(c, r * n + j, vec_get(c, r * n + j) + aik * vec_get(b, k * n + j))
+                j = j + 1
+            }
+            k = k + 1
+        }
+        r = r + 1
+    }
+    // checksum + sqrt of the sum (int -> f64 conversion)
+    let mut t = 0
+    let mut m = 0
+    while m < n * n {
+        t = t + vec_get(c, m)
+        m = m + 1
+    }
+    println(str_from_int(t))
+    println(str_from_f64(sqrt(f64_from_int(t))))
+    println("matrix ok")
+    return 0
+}

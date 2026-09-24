@@ -1,0 +1,28 @@
+// 35-perf-mem — allocation churn: many str + vec allocations.
+fn main() -> i64 {
+    // 5k short-lived strings
+    let mut i = 0
+    let mut tot = 0
+    while i < 5000 {
+        let s = "iter " + str_from_int(i) + "!"
+        tot = tot + s.len
+        i = i + 1
+    }
+    println(str_from_int(tot))
+    // vec of strs — 500 entries, then free all at once
+    let vs = vec_new()
+    let mut j = 0
+    while j < 500 {
+        vec_push(vs, "item-" + str_from_int(j))
+        j = j + 1
+    }
+    let mut tl = 0
+    let mut k = 0
+    while k < vs.len {
+        tl = tl + vec_get(vs, k).len
+        k = k + 1
+    }
+    println(str_from_int(tl))
+    println("mem ok")
+    return 0
+}

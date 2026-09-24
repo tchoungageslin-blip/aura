@@ -1,0 +1,54 @@
+// 33-perf-sort — quicksort 5k LCG pseudo-random values, checksum.
+// LCG fits i64: state < 2^31, *48271 < 2^47 — no wrap, so the
+// compiled i64 and interp i128 compute identical sequences.
+fn lcg_next(state: i64) -> i64 {
+    (state * 48271 + 11) % 2147483647
+}
+
+fn quick(v: vec<i64>, lo: usize, hi: usize) {
+    if lo >= hi { return }
+    let p = vec_get(v, hi)
+    let mut i = lo
+    let mut j = lo
+    while j < hi {
+        if vec_get(v, j) < p {
+            let t = vec_get(v, i)
+            vec_set(v, i, vec_get(v, j))
+            vec_set(v, j, t)
+            i = i + 1
+        }
+        j = j + 1
+    }
+    let t = vec_get(v, i)
+    vec_set(v, i, vec_get(v, hi))
+    vec_set(v, hi, t)
+    if i > lo { quick(v, lo, i - 1) }
+    if i < hi { quick(v, i + 1, hi) } else { () }
+}
+
+fn main() -> i64 {
+    let v = vec_new()
+    let mut s = 42
+    let mut i = 0
+    while i < 5000 {
+        s = lcg_next(s)
+        vec_push(v, s % 100000)
+        i = i + 1
+    }
+    quick(v, 0, v.len - 1)
+    // verify sorted + rolling checksum
+    let mut j = 1
+    while j < v.len {
+        if vec_get(v, j - 1) > vec_get(v, j) { return 1 }
+        j = j + 1
+    }
+    let mut h = 0
+    let mut k = 0
+    while k < v.len {
+        h = (h * 31 + vec_get(v, k)) % 1000000007
+        k = k + 1
+    }
+    println(str_from_int(h))
+    println("sort ok")
+    return 0
+}

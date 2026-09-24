@@ -214,6 +214,20 @@ impl<'a> Lexer<'a> {
                         is_float = true;
                         self.bump();
                     }
+                    // Scientific exponent: `1e20`, `1.5e-3`, `2E+7`.
+                    // Only when followed by a digit or `±`+digit — a
+                    // bare `e` stays an identifier (`1e` errors later).
+                    'e' | 'E'
+                        if self.peek_at(1).is_some_and(|c| c.is_ascii_digit())
+                            || (matches!(self.peek_at(1), Some('+' | '-'))
+                                && self.peek_at(2).is_some_and(|c| c.is_ascii_digit())) =>
+                    {
+                        is_float = true;
+                        self.bump(); // 'e'
+                        if matches!(self.peek(), Some('+' | '-')) {
+                            self.bump();
+                        }
+                    }
                     _ => break,
                 }
             }

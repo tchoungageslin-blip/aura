@@ -1,0 +1,35 @@
+// 30-perf-rec — recursion depth + memoized fib via vec.
+// Indexes are usize (Rust-like): memo is vec<i64> indexed by usize.
+fn fib(n: i64) -> i64 {
+    if n < 2 { n } else { fib(n - 1) + fib(n - 2) }
+}
+
+fn fibmemo(n: usize, memo: vec<i64>) -> i64 {
+    let m = vec_get(memo, n)
+    if m != 0 - 1 { return m }
+    let v = if n == 0 {
+        0
+    } else if n == 1 {
+        1
+    } else {
+        fibmemo(n - 1, memo) + fibmemo(n - 2, memo)
+    }
+    vec_set(memo, n, v)
+    v
+}
+
+fn main() -> i64 {
+    // naive fib(20) — recursion overhead
+    if fib(20) != 6765 { return 1 }
+    // memoized fib(90) — vec as the memo table
+    let memo = vec_new()
+    let mut i = 0
+    while i <= 90 {
+        vec_push(memo, 0 - 1)
+        i = i + 1
+    }
+    let r = fibmemo(90, memo)
+    println(str_from_int(r))
+    println("rec ok")
+    return 0
+}

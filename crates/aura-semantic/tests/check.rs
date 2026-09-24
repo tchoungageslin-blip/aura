@@ -616,3 +616,25 @@ fn builtin_str_from_byte_generic_int() {
         codes::SEM_TYPE_MISMATCH,
     );
 }
+
+#[test]
+fn builtin_float_conv_clean() {
+    let src = "fn main() -> i64 { let s: str = str_from_f64(3.5)\n let f: f64 = f64_from_int(7)\n let n: usize = 3\n let g: f64 = f64_from_int(n)\n if s == \"3.500000\" && f + g == 10.0 { 0 } else { 1 } }";
+    assert!(diags(src).is_empty(), "{:?}", diags(src));
+}
+
+#[test]
+fn builtin_float_conv_arg_mismatch() {
+    assert_has(
+        "fn main() -> i64 { str_from_f64(7)\n 0 }",
+        codes::SEM_TYPE_MISMATCH,
+    );
+    assert_has(
+        "fn main() -> i64 { f64_from_int(\"x\")\n 0 }",
+        codes::SEM_TYPE_MISMATCH,
+    );
+    assert_has(
+        "fn main() -> i64 { f64_from_int(1.5)\n 0 }",
+        codes::SEM_TYPE_MISMATCH,
+    );
+}

@@ -920,6 +920,119 @@ pub unsafe extern "C" fn aura_str_from_byte(v: i64, out: *mut RawStr) {
     }
 }
 
+/// `round(frac * 1e6)` where `frac` is an f64 in `[0, 1)` — computed
+/// exactly: `frac = m * 2^e` with `e < 0`, so `frac * 1e6` is an exact
+/// binary fraction and the result is `((m * 1e6) + 2^(s-1)) >> s`.
+/// Half-up on the exact value equals correct `%.6f` rounding: a dyadic
+/// f64 can never sit exactly on a `%.6f` tie boundary (a tie's decimal
+/// expansion needs a `5^7` factor in the denominator), so half-up and
+/// half-even coincide. Returns up to `1_000_000` (the carry case).
+#[cfg(target_os = "windows")]
+fn frac6(frac: f64) -> u64 {
+    if frac <= 0.0 || frac >= 1.0 {
+        return 0;
+    }
+    let bits = frac.to_bits();
+    let exp = ((bits >> 52) & 0x7ff) as i64;
+    // Subnormals (exp == 0) have no implicit bit and e = -1074.
+    let (m, e) = if exp == 0 {
+        (bits & ((1u64 << 52) - 1), -1074i64)
+    } else {
+        ((bits & ((1u64 << 52) - 1)) | (1u64 << 52), exp - 1075)
+    };
+    if e >= 0 {
+        // Integer value — no fraction.
+        return 0;
+    }
+    let s = (-e) as u32;
+    if s > 126 {
+        // frac * 1e6 < 0.5 — rounds to 0 (subnormal-range fracs).
+        return 0;
+    }
+    let num = (m as u128) * 1_000_000u128;
+    ((num + (1u128 << (s - 1))) >> s) as u64
+}
+
+/// `str_from_f64(v)` — `%.6f` fixed notation: `"3.141593"`,
+/// `"-0.000000"`, `"nan"`, `"inf"`/`"-inf"`. The integral part goes
+/// through a `u128`, so `|v| >= 1e38` prints as `"±inf"` — the
+/// documented range bound (interp prints the same).
+///
+/// # Safety
+/// `out` must point to a `RawStr`.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_str_from_f64(v: f64, out: *mut RawStr) {
+    let mut buf = [0u8; 64];
+    let n;
+    if v.is_nan() {
+        buf[..3].copy_from_slice(b"nan");
+        n = 3;
+    } else if v.abs() >= 1e38 || v.is_infinite() {
+        // Infinity AND the > u128-digit finite range share "±inf".
+        let mut i = 0usize;
+        if v.is_sign_negative() {
+            buf[0] = b'-';
+            i = 1;
+        }
+        buf[i..i + 3].copy_from_slice(b"inf");
+        n = i + 3;
+    } else {
+        let mut i = 0usize;
+        if v.is_sign_negative() {
+            buf[0] = b'-';
+            i = 1;
+        }
+        let mag = v.abs();
+        let mut int = mag as u128;
+        // `int as f64 == mag` exactly whenever mag is an f64 integer
+        // (always above 2^53), so frac is the true binary fraction.
+        let mut frac = frac6(mag - int as f64);
+        if frac == 1_000_000 {
+            int += 1;
+            frac = 0;
+        }
+        // Integral digits, reversed into tmp.
+        let mut tmp = [0u8; 40];
+        let mut t = 0usize;
+        if int == 0 {
+            tmp[0] = b'0';
+            t = 1;
+        }
+        let mut int = int;
+        while int > 0 {
+            tmp[t] = b'0' + (int % 10) as u8;
+            int /= 10;
+            t += 1;
+        }
+        while t > 0 {
+            t -= 1;
+            buf[i] = tmp[t];
+            i += 1;
+        }
+        buf[i] = b'.';
+        i += 1;
+        // Six fraction digits, zero-padded.
+        let mut div = 100_000u64;
+        while div > 0 {
+            buf[i] = b'0' + (frac / div % 10) as u8;
+            i += 1;
+            div /= 10;
+        }
+        n = i;
+    }
+    if !out.is_null() {
+        let p = aura_rt_alloc(n);
+        if p.is_null() {
+            unsafe { ExitProcess(14) };
+        }
+        unsafe {
+            memcpy(p.cast(), buf.as_ptr().cast(), n);
+            *out = RawStr { ptr: p, len: n };
+        }
+    }
+}
+
 // ----- file / process io ---------------------------------------------------------
 
 /// `Result<str, str>` as the runtime writes it — `i32` tag at 0,

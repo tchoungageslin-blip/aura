@@ -1,0 +1,35 @@
+// 32-perf-vec — push/get/set/pop churn on a big vec.
+fn main() -> i64 {
+    let v = vec_new()
+    let mut i = 0
+    while i < 50000 {
+        vec_push(v, i)
+        i = i + 1
+    }
+    if v.len != 50000 { return 1 }
+    // negate evens
+    let mut j = 0
+    while j < v.len {
+        if vec_get(v, j) % 2 == 0 {
+            vec_set(v, j, 0 - vec_get(v, j))
+        }
+        j = j + 1
+    }
+    // sum: odd elements minus even — Σall - 2·Σeven(0..49999)
+    let mut t = 0
+    let mut k = 0
+    while k < v.len {
+        t = t + vec_get(v, k)
+        k = k + 1
+    }
+    println(str_from_int(t))
+    // pop everything
+    let mut pops = 0
+    while v.len > 0 {
+        vec_pop(v)
+        pops = pops + 1
+    }
+    if pops != 50000 || v.len != 0 { return 2 }
+    println("vec ok")
+    return 0
+}
