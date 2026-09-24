@@ -99,3 +99,9 @@ details.ex .io b { color: var(--fg); font-weight: 600; }
   .grid { grid-template-columns: 1fr; }
   .hero h1 { font-size: 56px; }
 }
+#exfilter {
+  width: 100%; max-width: 420px; padding: 10px 14px; margin: 4px 0 8px;
+  background: var(--panel); border: 1px solid var(--edge); border-radius: 9px;
+  color: var(--fg); font-size: 15px;
+}
+#exfilter:focus { outline: none; border-color: var(--dim); }

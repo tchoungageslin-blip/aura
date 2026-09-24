@@ -13,6 +13,10 @@
       b.textContent = l === 'en' ? 'FR' : 'EN';
       b.title = l === 'en' ? 'Passer en français' : 'Switch to English';
     });
+    // bilingual placeholders: <input data-ph-en=".." data-ph-fr="..">
+    document.querySelectorAll('[data-ph-en]').forEach(function (el) {
+      el.placeholder = el.getAttribute(l === 'en' ? 'data-ph-en' : 'data-ph-fr') || '';
+    });
   }
 
   window.AURA_I18N = {

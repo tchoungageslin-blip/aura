@@ -8,7 +8,10 @@ platform. Executed 2025 — all steps shipped and live at
 
 - Everything learnable without leaving the site: install → guided
   path → tutorials → reference → 50 real programs → error index.
-- Bilingual EN/FR across static pages, generated gallery, and docs.
+- Bilingual EN/FR on the static pages, the generated examples
+  gallery, the getting-started guide, the cheatsheet and all
+  tutorials. The remaining reference chapters are English-first
+  (French mirrors land progressively).
 - Zero drift: example code is generated from the same `testsuite/`
   files that `aura test` runs; docs code blocks are compiled by the
   `docs_examples` gate.
@@ -19,9 +22,10 @@ platform. Executed 2025 — all steps shipped and live at
 
 ### S1 — i18n foundation
 
-- `site/i18n.js`: inline `len`/`lfr` spans toggled by `EN | FR` nav
-  button; language persisted in `localStorage` under `aura-lang`;
-  `lang` attribute and `<title>` updated on switch.
+- `site/i18n.js`: inline `len`/`lfr` spans toggled by an `EN|FR`
+  button injected into each nav; language persisted in `localStorage`
+  under `auraLang`; `lang` attribute updated on switch, and
+  `data-ph-en`/`data-ph-fr` attributes give bilingual placeholders.
 - CSS `.len`/`.lfr` display rules; `index.html`, `learn.html`,
   `download.html`, `errors.html` fully bilingual.
 
@@ -69,6 +73,23 @@ platform. Executed 2025 — all steps shipped and live at
 - `cargo fmt`, `cargo clippy`, `docs_examples` green.
 - Pushed `301da28..6347b11`; `pages.yml` run deployed; live checks:
   `/`, `/examples.html`, `/i18n.js`, `/docs/tutorials/` all 200.
+
+## Follow-ups (post-review fixes)
+
+- `examples-fr.json` coverage is now a hard gate in
+  `build-site.ps1`: a new scenario without a French description (or a
+  stale/orphan key) fails the build instead of silently shipping a
+  gap.
+- `og:`/`twitter:` meta on every page, plus `sitemap.xml` and a
+  bilingual `404.html`.
+- `docs/toggle-lang.js` (mdBook `additional-js`): pages with a French
+  mirror get an EN|FR switch and honour the site-level `auraLang`
+  preference — bridges the static-page / mdBook i18n gap.
+- `cheatsheet.md` + `fr/cheatsheet.md`: the whole language on one
+  compilable-tested page.
+- `examples.html` search box filters scenarios live.
+- `v0.1.1-alpha` retags master so the released binary matches the
+  documented surface (`aura doc tutorials`, salsa 0.28.5).
 
 ## Known limitation
 

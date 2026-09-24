@@ -18,7 +18,7 @@ Remove-Item -Recurse -Force $out -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $out | Out-Null
 
 # --- 1. static pages + assets -------------------------------------------------
-foreach ($f in 'index.html', 'download.html', 'learn.html', 'style.css', 'aura.js', 'i18n.js') {
+foreach ($f in 'index.html', 'download.html', 'learn.html', '404.html', 'sitemap.xml', 'style.css', 'aura.js', 'i18n.js') {
     Copy-Item "$root/site/$f" "$out/$f"
 }
 foreach ($f in 'favicon.png', 'icon.png', 'social.png', 'aura.svg') {
@@ -56,6 +56,13 @@ $errorsHtml = @"
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Error Index - Aura</title>
+<meta name="description" content="Every Aura diagnostic code - what it means and how to fix it.">
+<meta property="og:title" content="Aura Error Index">
+<meta property="og:description" content="Every Aura diagnostic code, explained.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://tchoungageslin-blip.github.io/aura/errors.html">
+<meta property="og:image" content="https://tchoungageslin-blip.github.io/aura/social.png">
+<meta name="twitter:card" content="summary">
 <link rel="icon" type="image/png" href="favicon.png">
 <link rel="stylesheet" href="style.css">
 <style>.dim{color:var(--dim)} td code{white-space:nowrap}</style>
@@ -106,6 +113,23 @@ $catFr = @{}
 foreach ($p in $fr.cat.PSObject.Properties) { $catFr[$p.Name] = $p.Value }
 $descFr = @{}
 foreach ($p in $fr.desc.PSObject.Properties) { $descFr[$p.Name] = $p.Value }
+
+# Coverage gate: every testsuite scenario needs a FR description and every
+# category a FR name - the build fails rather than silently emitting gaps.
+$missingFr = @()
+foreach ($dir in Get-ChildItem "$root/testsuite" -Directory | Sort-Object Name) {
+    if ($dir.Name -notmatch '^\d+-') { continue }
+    if (-not (Get-ChildItem $dir.FullName -Recurse -Filter *.aura)) { continue }
+    if (-not $descFr.ContainsKey($dir.Name)) { $missingFr += $dir.Name }
+}
+foreach ($c in $categories) {
+    if (-not $catFr.ContainsKey($c.id)) { $missingFr += "cat:$($c.id)" }
+}
+$orphans = @($descFr.Keys | Where-Object { -not (Test-Path "$root/testsuite/$_") })
+if ($missingFr -or $orphans) {
+    Write-Error ("examples-fr.json out of sync - missing: [{0}] orphans: [{1}]" -f
+        ($missingFr -join ', '), ($orphans -join ', '))
+}
 
 function Html([string]$s) { [System.Net.WebUtility]::HtmlEncode($s) }
 
@@ -193,6 +217,13 @@ $examplesHtml = @"
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Examples - Aura</title>
+<meta name="description" content="50 real Aura programs - all compiled and tested in CI.">
+<meta property="og:title" content="Aura Examples">
+<meta property="og:description" content="50 real Aura programs, generated from the CI-tested testsuite.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://tchoungageslin-blip.github.io/aura/examples.html">
+<meta property="og:image" content="https://tchoungageslin-blip.github.io/aura/social.png">
+<meta name="twitter:card" content="summary">
 <link rel="icon" type="image/png" href="favicon.png">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -207,6 +238,17 @@ Click a scenario to unfold its source.</span><span class="lfr">Chaque programme 
 produit la sortie attendue en CI - cette page est g&eacute;n&eacute;r&eacute;e depuis les
 m&ecirc;mes fichiers <code>testsuite/</code> que la suite diff&eacute;rentielle ex&eacute;cute.
 Clique sur un sc&eacute;nario pour d&eacute;plier sa source.</span></p>
+<p><input id="exfilter" type="search" data-ph-en="Filter examples&hellip;" data-ph-fr="Filtrer les exemples&hellip;" oninput="
+  var q = this.value.toLowerCase();
+  document.querySelectorAll('details.ex').forEach(function (d) {
+    d.style.display = !q || d.textContent.toLowerCase().indexOf(q) !== -1 ? '' : 'none';
+  });
+  document.querySelectorAll('h2.ex-cat').forEach(function (h) {
+    var n = h.nextElementSibling, any = false;
+    while (n && n.tagName === 'DETAILS') { if (n.style.display !== 'none') any = true; n = n.nextElementSibling; }
+    h.style.display = any ? '' : 'none';
+  });
+"></p>
 $exRows
 </article>
 <footer><p><span class="len">Generated from <code>testsuite/</code> - exercised by <code>aura test</code> on every commit.</span><span class="lfr">G&eacute;n&eacute;r&eacute; depuis <code>testsuite/</code> - exerc&eacute; par <code>aura test</code> &agrave; chaque commit.</span></p></footer>

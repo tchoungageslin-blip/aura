@@ -7,3 +7,4 @@ src = "src"
 [output.html]
 git-repository-url = "https://github.com/tchoungageslin-blip/aura"
 edit-url-template = "https://github.com/tchoungageslin-blip/aura/edit/master/docs/{path}"
+additional-js = ["toggle-lang.js"]

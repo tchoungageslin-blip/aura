@@ -4,6 +4,8 @@
 - [Getting Started](./getting-started.md)
 - [Démarrage (FR)](./fr/demarrage.md)
 - [The Language](./language.md)
+- [Cheatsheet](./cheatsheet.md)
+- [Aide-mémoire (FR)](./fr/cheatsheet.md)
 - [The Toolchain](./toolchain.md)
 - [Standard Library](./stdlib.md)
 - [Tutorials](./tutorials/README.md)
