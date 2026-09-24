@@ -1,0 +1,22 @@
+// 02-floats — f64/f32 arithmetic, sqrt, comparisons, edge values.
+fn main() -> i64 {
+    // basic arithmetic + precedence
+    if 1.5 * 4.0 != 6.0 { return 1 }
+    if 10.0 / 4.0 != 2.5 { return 2 }
+    if 1.0 / 3.0 <= 0.333 { return 3 }
+    if 1.0 / 3.0 >= 0.334 { return 4 }
+    // unary minus, parens
+    if -2.5 * -4.0 != 10.0 { return 5 }
+    // sqrt builtin (f64)
+    if sqrt(16.0) != 4.0 { return 6 }
+    if sqrt(2.0) * sqrt(2.0) < 1.999 { return 7 }
+    // f32 width
+    let x: f32 = 1.5
+    if x * 2.0 != 3.0 { return 8 }
+    // float comparisons in control flow — 0.1+0.2 = 0.30000000000000004
+    let t = 0.1 + 0.2
+    if !(t > 0.3) { return 9 }
+    if t <= 0.0 { return 10 }
+    println("floats ok")
+    0
+}

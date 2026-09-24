@@ -1174,6 +1174,19 @@ fn builtin_fn_type(infer: &mut InferCtx, b: BuiltinFn) -> Type {
             params: vec![Type::Float(FloatTy::F64)],
             ret: Box::new(Type::Float(FloatTy::F64)),
         },
+        BuiltinFn::StrFromInt => {
+            // Generic over int widths — `str_from_int(v.len)` must work
+            // on usize; codegen narrows/extends to i64 for the runtime.
+            let t = infer.new_var(VarKind::Int);
+            Type::Fn {
+                params: vec![t],
+                ret: Box::new(Type::Str),
+            }
+        }
+        BuiltinFn::StrFromBool => Type::Fn {
+            params: vec![Type::Bool],
+            ret: Box::new(Type::Str),
+        },
         BuiltinFn::VecNew => {
             let t = infer.new_var(VarKind::Any);
             Type::Fn {

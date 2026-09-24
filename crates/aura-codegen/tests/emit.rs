@@ -232,3 +232,16 @@ fn i128_emits_object() {
     assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
     assert!(out.object.is_some());
 }
+
+#[test]
+fn str_from_int_imports_aura_str_from_int() {
+    let out =
+        compile("fn main() -> i64 { let s = str_from_int(7)\n if s == \"7\" { 0 } else { 1 } }");
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    let obj = out.object.expect("object expected");
+    assert!(
+        obj.windows(b"aura_str_from_int".len())
+            .any(|w| w == b"aura_str_from_int"),
+        "object must import aura_str_from_int"
+    );
+}

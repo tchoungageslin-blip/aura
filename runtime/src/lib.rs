@@ -714,3 +714,73 @@ pub unsafe extern "C" fn aura_rt_env(name: *const u8, name_len: usize, out: *mut
     unsafe { aura_rt_free(wbuf.cast()) };
     unsafe { *out = s };
 }
+
+// ----- conversions -------------------------------------------------------------
+
+/// `str_from_int(v)` — decimal render of `v` into a fresh heap str.
+/// Writes `{ptr, len}` to `out`; `out` must be writable.
+///
+/// # Safety
+/// `out` must point to a `RawStr`.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_str_from_int(v: i64, out: *mut RawStr) {
+    if out.is_null() {
+        return;
+    }
+    let mut tmp = [0u8; 20];
+    let neg = v < 0;
+    let mut u = v.unsigned_abs();
+    let mut n = 0usize;
+    loop {
+        tmp[n] = b'0' + u8::try_from(u % 10).unwrap_or(b'0');
+        u /= 10;
+        n += 1;
+        if u == 0 {
+            break;
+        }
+    }
+    let total = n + usize::from(neg);
+    let p = aura_rt_alloc(total);
+    if p.is_null() {
+        unsafe { ExitProcess(14) };
+    }
+    unsafe {
+        let mut w = p;
+        if neg {
+            *w = b'-';
+            w = w.add(1);
+        }
+        let mut i = 0;
+        while i < n {
+            *w.add(i) = tmp[n - 1 - i];
+            i += 1;
+        }
+        *out = RawStr { ptr: p, len: total };
+    }
+}
+
+/// `str_from_bool(v)` — `"true"`/`"false"` into a fresh heap str.
+///
+/// # Safety
+/// `out` must point to a `RawStr`.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_str_from_bool(v: u8, out: *mut RawStr) {
+    if out.is_null() {
+        return;
+    }
+    let (s, n): (*const u8, usize) = if v == 0 {
+        (b"false".as_ptr(), 5)
+    } else {
+        (b"true".as_ptr(), 4)
+    };
+    let p = aura_rt_alloc(n);
+    if p.is_null() {
+        unsafe { ExitProcess(14) };
+    }
+    unsafe {
+        memcpy(p.cast(), s.cast(), n);
+        *out = RawStr { ptr: p, len: n };
+    }
+}

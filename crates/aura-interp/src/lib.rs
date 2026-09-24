@@ -332,6 +332,8 @@ enum Builtin {
     VecSet,
     Args,
     Env,
+    StrFromInt,
+    StrFromBool,
 }
 
 /// The interpreter: item tables plus a scope stack and fuel.
@@ -612,16 +614,8 @@ impl<'a> Interp<'a> {
             }
             Expr::Assign { target, value } => {
                 let v = self.expr(value)?;
-                let Expr::Ident(name) = self.parsed().ast.expr(target) else {
-                    return Err(InterpError::Unsupported("non-ident assignment"));
-                };
-                for scope in self.scopes.iter_mut().rev() {
-                    if scope.contains_key(name) {
-                        scope.insert(*name, v.clone());
-                        return Ok(v);
-                    }
-                }
-                Err(InterpError::Unresolved(self.name_of(*name)))
+                self.assign(target, v.clone())?;
+                Ok(v)
             }
             Expr::Call { callee, args } => self.call(callee, &args),
             Expr::Field { object, field } => {
@@ -829,6 +823,31 @@ impl<'a> Interp<'a> {
 
     // ----- calls & match ----------------------------------------------------------
 
+    /// Assign `v` to an lvalue: `x = v` or `p.a.b = v` — mutates the
+    /// struct field in place through the root binding (value semantics,
+    /// matching codegen's stack-slot store).
+    fn assign(&mut self, target: ExprId, v: Value) -> Result<(), InterpError> {
+        let mut path: Vec<String> = Vec::new();
+        let mut cur = target;
+        let root = loop {
+            match self.parsed().ast.expr(cur) {
+                Expr::Ident(n) => break *n,
+                Expr::Field { object, field } => {
+                    path.push(self.name_of(*field));
+                    cur = *object;
+                }
+                _ => return Err(InterpError::Unsupported("non-lvalue assignment")),
+            }
+        };
+        path.reverse();
+        for scope in self.scopes.iter_mut().rev() {
+            if let Some(slot) = scope.get_mut(&root) {
+                return set_field_path(&self.structs, slot, &path, v);
+            }
+        }
+        Err(InterpError::Unresolved(self.name_of(root)))
+    }
+
     fn call(&mut self, callee: ExprId, args: &[ExprId]) -> Result<Value, InterpError> {
         let vals: Vec<Value> = args
             .iter()
@@ -942,6 +961,8 @@ impl Builtin {
             "vec_set" => Some(Self::VecSet),
             "args" => Some(Self::Args),
             "env" => Some(Self::Env),
+            "str_from_int" => Some(Self::StrFromInt),
+            "str_from_bool" => Some(Self::StrFromBool),
             _ => None,
         }
     }
@@ -1011,7 +1032,38 @@ impl Builtin {
             (Self::Env, [Value::Str(name)]) => Ok(Value::Str(Rc::from(
                 std::env::var(name.as_ref()).unwrap_or_default().as_str(),
             ))),
+            (Self::StrFromInt, [Value::Int(v)]) => {
+                Ok(Value::Str(Rc::from(format!("{v}").as_str())))
+            }
+            (Self::StrFromBool, [Value::Bool(b)]) => {
+                Ok(Value::Str(Rc::from(if *b { "true" } else { "false" })))
+            }
             _ => Err(InterpError::Type("bad builtin args".into())),
         }
     }
+}
+
+/// Walk `slot`'s struct fields along `path` and assign `v` — `p.a.b = v`
+/// mutates in place through the root binding (value semantics, matching
+/// codegen's stack-slot store).
+fn set_field_path(
+    structs: &HashMap<String, Vec<String>>,
+    slot: &mut Value,
+    path: &[String],
+    v: Value,
+) -> Result<(), InterpError> {
+    let Some((f, rest)) = path.split_first() else {
+        *slot = v;
+        return Ok(());
+    };
+    let Value::Struct { name, fields } = slot else {
+        return Err(InterpError::Type("assign through non-struct".into()));
+    };
+    let names = structs
+        .get(name.as_str())
+        .ok_or_else(|| InterpError::Unresolved(name.clone()))?;
+    let Some(idx) = names.iter().position(|n| n == f) else {
+        return Err(InterpError::Unresolved(f.clone()));
+    };
+    set_field_path(structs, &mut fields[idx], rest, v)
 }

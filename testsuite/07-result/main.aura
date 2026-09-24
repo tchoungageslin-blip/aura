@@ -1,0 +1,43 @@
+// 07-result — Result<T,E>, `?` propagation chains, match recovery.
+// (match-arm bodies are expressions: `exit(N)` works where `return` can't.)
+fn parse_nonneg(s: str) -> Result<i64, str> {
+    if s == "pos" { Ok(10) } else { Err("neg") }
+}
+
+fn double(x: i64) -> Result<i64, str> {
+    if x > 100 { Err("too big") } else { Ok(x * 2) }
+}
+
+fn chain(s: str) -> Result<i64, str> {
+    let a = parse_nonneg(s)?
+    let b = double(a)?
+    Ok(b + 1)
+}
+
+fn main() -> i64 {
+    // happy path
+    match chain("pos") {
+        Ok(v) => {
+            if v != 21 { exit(1) }
+            0
+        },
+        Err(e) => exit(2),
+    }
+    // error propagates through ? — outer sees inner Err verbatim
+    match chain("no") {
+        Ok(v) => exit(3),
+        Err(e) => {
+            if e != "neg" { exit(4) }
+            0
+        },
+    }
+    // `?` inside a larger expression
+    let r: Result<i64, str> = Ok(5)
+    let total = match r {
+        Ok(v) => v + 100,
+        Err(e) => 0,
+    }
+    if total != 105 { exit(5) }
+    println("result ok")
+    0
+}

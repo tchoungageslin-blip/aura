@@ -31,6 +31,10 @@ pub enum BuiltinFn {
     Exit,
     /// `sqrt(x: f64) -> f64` — hardware square root.
     Sqrt,
+    /// `str_from_int(v: i64) -> str` — decimal rendering, heap-allocated.
+    StrFromInt,
+    /// `str_from_bool(v: bool) -> str` — `"true"`/`"false"`.
+    StrFromBool,
     /// `vec_new<T>() -> vec<T>` — empty `{ptr: 0, len: 0, cap: 0}`.
     VecNew,
     /// `vec_push<T>(v: vec<T>, x: T)` — grow + append in place.
@@ -54,6 +58,8 @@ impl BuiltinFn {
         Self::Eprintln,
         Self::Exit,
         Self::Sqrt,
+        Self::StrFromInt,
+        Self::StrFromBool,
         Self::VecNew,
         Self::VecPush,
         Self::VecGet,
@@ -71,6 +77,8 @@ impl BuiltinFn {
             Self::Eprintln => "eprintln",
             Self::Exit => "exit",
             Self::Sqrt => "sqrt",
+            Self::StrFromInt => "str_from_int",
+            Self::StrFromBool => "str_from_bool",
             Self::VecNew => "vec_new",
             Self::VecPush => "vec_push",
             Self::VecGet => "vec_get",
@@ -91,6 +99,8 @@ impl BuiltinFn {
             Self::Eprintln => "aura_rt_eprintln",
             Self::Exit => "aura_rt_exit",
             Self::Sqrt => "sqrt",
+            Self::StrFromInt => "aura_str_from_int",
+            Self::StrFromBool => "aura_str_from_bool",
             Self::VecPush => "aura_vec_push",
             Self::VecGet => "aura_vec_get",
             Self::Args => "aura_rt_args",

@@ -1,0 +1,29 @@
+// 10-memory — allocation churn: build/discard strings and vecs in a
+// hot loop; the heap must keep up and values must stay correct.
+// Counters/totals are usize — same width as `.len`, no casts needed.
+fn make(i: usize) -> str {
+    "item-" + str_from_int(i)
+}
+
+fn main() -> i64 {
+    let mut total: usize = 0
+    let mut i: usize = 0
+    while i < 50000 {
+        let s = make(i)
+        total = total + s.len
+        let v = vec_new()
+        vec_push(v, i)
+        vec_push(v, i + 1)
+        vec_push(v, i * 2)
+        total = total + vec_get(v, 2)
+        i = i + 1
+    }
+    // len("item-N"): 5 + digits(0..49999 → 1..5)
+    // sum = 50000*5 + (9*1 + 90*2 + 900*3 + 9000*4 + 40000*5)
+    //     = 10*6 + 90*7 + 900*8 + 9000*9 + 40000*10 = 488890
+    // plus sum(2i) for i in 0..50000 = 49999 * 50000 = 2499950000
+    if total != 2500438890 { return 1 }
+    println(str_from_int(total))
+    println("memory ok")
+    0
+}

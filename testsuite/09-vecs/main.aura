@@ -1,0 +1,37 @@
+// 09-vecs — generic vec<T>: push/get/set, growth, aggregate elements.
+fn sum(v: vec<i64>) -> i64 {
+    let mut t = 0
+    let mut i = 0
+    while i < v.len {
+        t = t + vec_get(v, i)
+        i = i + 1
+    }
+    t
+}
+
+fn main() -> i64 {
+    let v = vec_new()
+    let mut i = 0
+    while i < 10 {
+        vec_push(v, i * i)
+        i = i + 1
+    }
+    if v.len != 10 { return 1 }
+    if v.cap < 10 { return 2 }
+    if sum(v) != 285 { return 3 }   // 0+1+4+...+81
+    vec_set(v, 0, 100)
+    if vec_get(v, 0) != 100 { return 4 }
+    // vec<str> — aggregate elements
+    let ws = vec_new()
+    vec_push(ws, "a")
+    vec_push(ws, "b")
+    if vec_get(ws, 0) + vec_get(ws, 1) != "ab" { return 5 }
+    // vec in struct field
+    let b = Bag { items: v }
+    if b.items.len != 10 { return 6 }
+    println(str_from_int(sum(v)))
+    println("vecs ok")
+    0
+}
+
+struct Bag { items: vec<i64> }

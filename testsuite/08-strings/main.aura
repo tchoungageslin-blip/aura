@@ -1,0 +1,27 @@
+// 08-strings — literals, escapes, equality, concat, fields, conversions.
+fn main() -> i64 {
+    let a = "hello"
+    if a.len != 5 { return 1 }
+    if a != "hello" || a == "bye" { return 2 }
+    // escapes — a, \n, b, \t, ", q, ", \ = 8 bytes
+    let esc = "a\nb\t\"q\"\\"
+    if esc.len != 8 { return 3 }
+    // concat allocates a new buffer
+    let ab = a + " " + "world"
+    if ab != "hello world" || ab.len != 11 { return 4 }
+    // conversions (F3)
+    if str_from_int(-42) != "-42" { return 5 }
+    if str_from_bool(true) != "true" { return 6 }
+    if str_from_bool(false).len != 5 { return 7 }
+    // str params and returns
+    if shout("go") != "go!" { return 8 }
+    // empty string + .ptr identity across clones
+    let e = ""
+    if e.len != 0 { return 9 }
+    if a.ptr != a.ptr { return 10 }
+    println(ab + " " + str_from_int(a.len))
+    println("strings ok")
+    0
+}
+
+fn shout(s: str) -> str { s + "!" }

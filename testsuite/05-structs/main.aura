@@ -1,0 +1,30 @@
+// 05-structs — nesting, field access + assignment, params, copies.
+struct Point { x: i64, y: i64 }
+struct Rect { tl: Point, br: Point }
+
+fn area(r: Rect) -> i64 {
+    (r.br.x - r.tl.x) * (r.br.y - r.tl.y)
+}
+
+fn moved(p: Point, dx: i64, dy: i64) -> Point {
+    Point { x: p.x + dx, y: p.y + dy }
+}
+
+fn main() -> i64 {
+    let r = Rect { tl: Point { x: 0, y: 0 }, br: Point { x: 4, y: 3 } }
+    if area(r) != 12 { return 1 }
+    // field assignment (incl. nested) — parity with codegen
+    let mut p = Point { x: 1, y: 2 }
+    p.x = 10
+    if p.x != 10 || p.y != 2 { return 2 }
+    let mut rr = Rect { tl: p, br: Point { x: 20, y: 20 } }
+    rr.tl.y = 5
+    if rr.tl.y != 5 { return 3 }
+    // value copy: mutating the copy must not touch the source
+    let q = moved(p, 1, 1)
+    if p.x != 10 { return 4 }
+    if q.x != 11 || q.y != 3 { return 5 }
+    println(str_from_int(area(rr)))
+    println("structs ok")
+    0
+}

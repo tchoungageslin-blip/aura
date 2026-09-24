@@ -238,6 +238,11 @@ fn declare_builtins(
                 sig.params.push(AbiParam::new(types::F64));
                 sig.returns.push(AbiParam::new(types::F64));
             }
+            // (v: i64, out: *mut {ptr,len}) — bool args uextend to i64.
+            BuiltinFn::StrFromInt | BuiltinFn::StrFromBool => {
+                sig.params
+                    .extend([AbiParam::new(types::I64), AbiParam::new(ptr)]);
+            }
             // (data, len, cap, elem_ptr, elem_size, cap_out) -> data'
             BuiltinFn::VecPush => {
                 sig.params.extend([AbiParam::new(ptr); 6]);
@@ -760,6 +765,27 @@ impl FnGen<'_, '_> {
                 if let Some(r) = self.call_builtin_sym(b, &[v]) {
                     self.store(dest, r);
                 }
+            }
+            BuiltinFn::StrFromInt | BuiltinFn::StrFromBool => {
+                // (v, out) — the runtime writes the `{ptr,len}` into
+                // `dest`. `str_from_int` is generic over int widths:
+                // normalize the operand to I64 (sext signed, uext
+                // unsigned/bool, ireduce i128).
+                let Some(op) = args.first() else { return };
+                let mut v = self.operand_val(op);
+                let cur = self.b.func.dfg.value_type(v);
+                v = if cur == types::I64 {
+                    v
+                } else if cur == types::I128 {
+                    self.b.ins().ireduce(types::I64, v)
+                } else {
+                    match self.operand_ty(op) {
+                        Type::Int(i) if !i.is_signed() => self.b.ins().uextend(types::I64, v),
+                        _ => self.b.ins().sextend(types::I64, v),
+                    }
+                };
+                let da = self.place_addr(dest);
+                self.call_builtin_sym(b, &[v, da]);
             }
             BuiltinFn::VecNew => {
                 // `vec<T>` = `{ptr: 0, len: 0, cap: 0}` — an unallocated

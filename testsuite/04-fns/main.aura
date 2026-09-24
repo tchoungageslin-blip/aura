@@ -1,0 +1,28 @@
+// 04-fns — recursion, mutual recursion, multi-arg calls, forward refs.
+fn fib(n: i64) -> i64 {
+    if n < 2 { n } else { fib(n - 1) + fib(n - 2) }
+}
+
+fn is_even(n: i64) -> bool {
+    if n == 0 { true } else { is_odd(n - 1) }
+}
+
+fn is_odd(n: i64) -> bool {
+    if n == 0 { false } else { is_even(n - 1) }
+}
+
+fn sum3(a: i64, b: i64, c: i64) -> i64 { a + b + c }
+
+fn main() -> i64 {
+    // calls resolve regardless of declaration order (main comes last)
+    if fib(10) != 55 { return 1 }
+    if fib(0) != 0 || fib(1) != 1 { return 2 }
+    if !is_even(10) || is_even(7) { return 3 }
+    if !is_odd(9) || is_odd(4) { return 4 }
+    if sum3(1, 2, 3) != 6 { return 5 }
+    // nested call expressions as arguments
+    if sum3(fib(3), fib(4), fib(5)) != 10 { return 6 }
+    println(str_from_int(fib(15)))
+    println("fns ok")
+    0
+}

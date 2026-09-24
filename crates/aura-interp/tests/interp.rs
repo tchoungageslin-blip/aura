@@ -266,3 +266,30 @@ fn args_and_env() {
     let src = "fn main() -> i64 { let a = args()\n let p = env(\"PATH\")\n let missing = env(\"NO_SUCH_AURA_VAR_123\")\n if a.len >= 1 && p.len > 0 && missing == \"\" { 5 } else { 0 } }";
     assert_eq!(run(src), 5);
 }
+
+#[test]
+fn struct_field_assign() {
+    // Found by the testsuite: `p.x = v` used to be Unsupported in interp
+    // while codegen accepted it — engine parity gap.
+    let src = "\
+struct P { x: i64, y: i64 }
+fn main() -> i64 {
+    let mut p = P { x: 1, y: 2 }
+    p.x = 7
+    if p.x == 7 && p.y == 2 { 0 } else { 1 }
+}";
+    assert_eq!(run(src), 0);
+}
+
+#[test]
+fn nested_field_assign() {
+    let src = "\
+struct I { v: i64 }
+struct O { inner: I, tag: i64 }
+fn main() -> i64 {
+    let mut o = O { inner: I { v: 1 }, tag: 9 }
+    o.inner.v = 42
+    if o.inner.v == 42 && o.tag == 9 { 0 } else { 1 }
+}";
+    assert_eq!(run(src), 0);
+}

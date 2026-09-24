@@ -551,3 +551,17 @@ fn args_and_env_clean() {
     let src = "fn main() -> i64 { let a = args()\n let e = env(\"PATH\")\n if a.len >= 1 && e.len > 0 { 1 } else { 0 } }";
     assert!(diags(src).is_empty(), "{:?}", diags(src));
 }
+
+#[test]
+fn builtin_str_from_int_clean() {
+    let src = "fn main() -> i64 { let s = str_from_int(42)\n if s == \"42\" { 1 } else { 0 } }";
+    assert!(diags(src).is_empty(), "{:?}", diags(src));
+}
+
+#[test]
+fn builtin_str_from_int_arg_mismatch() {
+    assert_has(
+        "fn main() -> i64 { str_from_int(true)\n 0 }",
+        codes::SEM_TYPE_MISMATCH,
+    );
+}

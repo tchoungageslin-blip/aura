@@ -1,0 +1,38 @@
+// 06-enums — payloads, exhaustive match, nesting, match-as-value.
+enum Shape { Circle(f64), Rect(f64, f64), Empty }
+enum Wrap { S(Shape), N(i64) }
+
+fn area(s: Shape) -> i64 {
+    match s {
+        Circle(r) => if r > 1.0 { 1 } else { 0 },
+        Rect(w, h) => if w * h > 4.0 { 2 } else { 0 },
+        Empty => 3,
+    }
+}
+
+fn tag(w: Wrap) -> i64 {
+    match w {
+        S(Circle(r)) => 10,
+        S(Rect(w, h)) => 20,
+        S(Empty) => 30,
+        N(v) => v,
+    }
+}
+
+fn main() -> i64 {
+    if area(Circle(2.0)) != 1 { return 1 }
+    if area(Rect(3.0, 3.0)) != 2 { return 2 }
+    if area(Empty) != 3 { return 3 }
+    // match as a value + wildcard arm
+    let k = match Circle(1.0) {
+        Circle(r) => 7,
+        _ => 9,
+    }
+    if k != 7 { return 4 }
+    // nested enum payloads bind through
+    if tag(S(Rect(1.0, 2.0))) != 20 { return 5 }
+    if tag(S(Empty)) != 30 { return 6 }
+    if tag(N(8)) != 8 { return 7 }
+    println("enums ok")
+    0
+}
