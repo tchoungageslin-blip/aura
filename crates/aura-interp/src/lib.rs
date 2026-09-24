@@ -147,6 +147,12 @@ pub fn run_parsed(parsed: &aura_parser::ParsedFile) -> Result<i64, InterpError> 
     run_files(&[parsed])
 }
 
+/// Like [`run_parsed`] but returns everything the program wrote to
+/// stdout/stderr instead of forwarding it — for `aura test` and tools.
+pub fn run_parsed_capture(parsed: &aura_parser::ParsedFile) -> Captured {
+    run_files_capture(&[parsed])
+}
+
 /// Interpret `main` across a project's files (flat namespace — dep items
 /// are visible everywhere). `files` matches `Project::files` order; the
 /// entry file is last but `main` may resolve from any file.
@@ -165,20 +171,66 @@ pub fn run_project(
     run_files(&files)
 }
 
+/// Like [`run_project`] but captures stdout/stderr — see
+/// [`run_parsed_capture`].
+pub fn run_project_capture(
+    db: &dyn aura_salsa_db::Db,
+    project: aura_salsa_db::Project,
+) -> Captured {
+    let files: Vec<&aura_parser::ParsedFile> = project
+        .files(db)
+        .iter()
+        .map(|f| aura_salsa_db::parsed(db, *f))
+        .collect();
+    run_files_capture(&files)
+}
+
 fn run_files(files: &[&aura_parser::ParsedFile]) -> Result<i64, InterpError> {
+    let c = run_files_capture(files);
+    emit_captured(&c);
+    c.result
+}
+
+fn emit_captured(c: &Captured) {
+    use std::io::Write;
+    let _ = std::io::stdout().write_all(&c.stdout);
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().write_all(&c.stderr);
+    let _ = std::io::stderr().flush();
+}
+
+fn run_files_capture(files: &[&aura_parser::ParsedFile]) -> Captured {
     // Deep Aura recursion is Rust recursion here — the default 1–8 MB
     // thread stack overflows on real programs (fib(25) ≈ 240k calls).
     // Run on a dedicated 256 MB stack; `scope` joins before returning.
     // `InterpError` isn't `Send` (Rc inside `Value`), so it crosses the
     // thread boundary as a `(tag, msg)` pair.
     std::thread::scope(|s| {
-        std::thread::Builder::new()
+        let r = std::thread::Builder::new()
             .stack_size(256 * 1024 * 1024)
-            .spawn_scoped(s, || run_files_inner(files).map_err(|e| encode_err(&e)))
-            .map_err(|_| InterpError::Unsupported("spawn interp thread"))?
-            .join()
-            .unwrap_or_else(|_| Err((255, "interp thread panicked".into())))
-            .map_err(|(t, m)| decode_err(t, m))
+            .spawn_scoped(s, || {
+                let (res, out, err) = run_files_inner(files);
+                (res.map_err(|e| encode_err(&e)), out, err)
+            });
+        match r {
+            Err(_) => Captured {
+                result: Err(InterpError::Unsupported("spawn interp thread")),
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            },
+            Ok(h) => match h.join() {
+                Ok((res, out, err)) => Captured {
+                    result: res.map_err(|(t, m)| decode_err(t, m)),
+                    stdout: out,
+                    stderr: err,
+                },
+                Err(_) => Captured {
+                    result: Err(InterpError::Unsupported("interp thread panicked")),
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                },
+            },
+        }
     })
 }
 
@@ -211,9 +263,11 @@ fn decode_err(tag: u8, msg: String) -> InterpError {
     }
 }
 
-fn run_files_inner(files: &[&aura_parser::ParsedFile]) -> Result<i64, InterpError> {
+fn run_files_inner(
+    files: &[&aura_parser::ParsedFile],
+) -> (Result<i64, InterpError>, Vec<u8>, Vec<u8>) {
     let mut interp = Interp::new(files);
-    match interp.call_main() {
+    let res = match interp.call_main() {
         Ok(Value::Int(v)) => {
             i64::try_from(v).map_err(|_| InterpError::Type("main result out of i64 range".into()))
         }
@@ -221,7 +275,12 @@ fn run_files_inner(files: &[&aura_parser::ParsedFile]) -> Result<i64, InterpErro
         // `exit(code)` anywhere in the program ends it here.
         Err(InterpError::Escape(Escape::Exit(code))) => Ok(code),
         Err(e) => Err(e),
-    }
+    };
+    (
+        res,
+        std::mem::take(&mut interp.out),
+        std::mem::take(&mut interp.err),
+    )
 }
 
 /// Non-value control flow out of a block/statement.
@@ -294,6 +353,18 @@ struct Interp<'a> {
     builtins: HashSet<String>,
     scopes: Vec<HashMap<Spur, Value>>,
     steps: u64,
+    /// Captured stdout/stderr — `print`/`eprint` write here so callers
+    /// can inspect output (`run_*` flushes them to the real streams).
+    out: Vec<u8>,
+    err: Vec<u8>,
+}
+
+/// Output captured from an interpreted run: the result plus everything
+/// the program wrote to stdout/stderr.
+pub struct Captured {
+    pub result: Result<i64, InterpError>,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
 }
 
 const STEP_LIMIT: u64 = 5_000_000;
@@ -309,6 +380,8 @@ impl<'a> Interp<'a> {
             builtins: HashSet::new(),
             scopes: vec![HashMap::new()],
             steps: 0,
+            out: Vec::new(),
+            err: Vec::new(),
         };
         for (fi, parsed) in this.files.iter().enumerate() {
             this.cur = fi;
@@ -780,13 +853,13 @@ impl<'a> Interp<'a> {
         }
         if self.builtins.contains(&cname) {
             let b = Builtin::by_name(&cname).expect("registered builtin");
-            return b.call(&vals);
+            return b.call(&vals, &mut self.out, &mut self.err);
         }
         let Some(&(fi, idx)) = self.fns.get(&cname) else {
             // Prelude builtins — reached only when no user fn/variant
             // claimed the name above, so user definitions shadow them.
             if let Some(b) = Builtin::by_name(&cname) {
-                return b.call(&vals);
+                return b.call(&vals, &mut self.out, &mut self.err);
             }
             return Err(InterpError::Unresolved(cname));
         };
@@ -873,19 +946,20 @@ impl Builtin {
         }
     }
 
-    fn call(self, args: &[Value]) -> Result<Value, InterpError> {
+    fn call(
+        self,
+        args: &[Value],
+        out: &mut dyn std::io::Write,
+        err: &mut dyn std::io::Write,
+    ) -> Result<Value, InterpError> {
         use std::io::Write;
-        let write = |stderr: bool, s: &str, nl: bool| {
-            let out: &mut dyn Write = if stderr {
-                &mut std::io::stderr()
-            } else {
-                &mut std::io::stdout()
-            };
-            let _ = out.write_all(s.as_bytes());
+        let mut write = |stderr: bool, s: &str, nl: bool| {
+            let w: &mut dyn Write = if stderr { &mut *err } else { &mut *out };
+            let _ = w.write_all(s.as_bytes());
             if nl {
-                let _ = out.write_all(b"\n");
+                let _ = w.write_all(b"\n");
             }
-            let _ = out.flush();
+            let _ = w.flush();
         };
         match (self, args) {
             (Self::Sqrt, [Value::Float(x)]) => Ok(Value::Float(x.sqrt())),

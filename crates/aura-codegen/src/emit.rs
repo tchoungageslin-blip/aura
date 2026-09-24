@@ -281,8 +281,11 @@ fn clif_ty(ty: &Type, ptr: cranelift_codegen::ir::Type) -> cranelift_codegen::ir
             1 => types::I8,
             2 => types::I16,
             4 => types::I32,
-            // 8 + anything wider — i128 deferred, E3004 guards the path.
-            _ => types::I64,
+            8 => types::I64,
+            // i128/u128 — clif has native I128 ops; constants are still
+            // 64-bit immediates (sign-extended), which is all the
+            // frontend emits today.
+            _ => types::I128,
         },
         Type::Float(FloatTy::F32) => types::F32,
         Type::Float(FloatTy::F64) => types::F64,
@@ -462,7 +465,19 @@ impl FnGen<'_, '_> {
         match ty {
             Type::Float(FloatTy::F32) => self.b.ins().f32const(0.0f32),
             Type::Float(FloatTy::F64) => self.b.ins().f64const(0.0f64),
-            _ => self.b.ins().iconst(clif_ty(ty, self.ptr), 0),
+            _ => self.int_const(clif_ty(ty, self.ptr), 0),
+        }
+    }
+
+    /// Integer constant of clif type `ty` — `iconst` has no `I128` form,
+    /// so 128-bit values are sign-extended through `iconcat`.
+    fn int_const(&mut self, ty: cranelift_codegen::ir::Type, v: i64) -> Value {
+        if ty == types::I128 {
+            let lo = self.b.ins().iconst(types::I64, v);
+            let hi = self.b.ins().iconst(types::I64, v >> 63);
+            self.b.ins().iconcat(lo, hi)
+        } else {
+            self.b.ins().iconst(ty, v)
         }
     }
 
@@ -1220,7 +1235,7 @@ impl FnGen<'_, '_> {
         match c {
             Const::Int(v, i) => {
                 let ty = clif_ty(&Type::Int(*i), self.ptr);
-                self.b.ins().iconst(ty, (*v).cast_signed())
+                self.int_const(ty, (*v).cast_signed())
             }
             Const::Float(v, FloatTy::F32) => self.b.ins().f32const(*v as f32),
             Const::Float(v, FloatTy::F64) => self.b.ins().f64const(*v),

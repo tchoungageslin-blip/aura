@@ -17,7 +17,7 @@ pub use layout::{Layout, enum_layout, layout_of, scalar_size_align, struct_layou
 use aura_common::{Diagnostic, FileId, Span, codes};
 use aura_mir::{MirBody, mir_fn, mir_project_fn};
 use aura_salsa_db::{Db, FileItems, ItemSig, Project, SourceFile, file_items, project_items};
-use aura_semantic::{IntTy, Type, lower_typename};
+use aura_semantic::{Type, lower_typename};
 
 /// Result of compiling one file.
 pub struct CompileOutput {
@@ -143,7 +143,7 @@ fn finish_compile(
 
 fn unsupported_ty(t: &Type, items: &FileItems) -> bool {
     match t {
-        Type::Int(IntTy::I128 | IntTy::U128) | Type::Tuple(_) | Type::Fn { .. } => true,
+        Type::Tuple(_) | Type::Fn { .. } => true,
         Type::Pointer { pointee, .. } => unsupported_ty(pointee, items),
         // An aggregate is supported iff a C-compatible layout exists for
         // it (all fields representable; enums additionally need a tag).

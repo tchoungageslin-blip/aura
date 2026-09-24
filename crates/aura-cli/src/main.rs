@@ -54,6 +54,15 @@ enum Command {
         #[arg(short, long, default_value_t = 3)]
         iters: u32,
     },
+    /// Run the validation testsuite: every `testsuite/<NN>-*` scenario
+    /// in order, compiled and interpreted, stopping at the first failure.
+    Test {
+        /// testsuite root (default `./testsuite`) or a scenario dir.
+        path: Option<PathBuf>,
+        /// Run only scenarios whose name contains this string.
+        #[arg(short, long)]
+        only: Option<String>,
+    },
     /// Start the Language Server Protocol server over stdio.
     Lsp,
     /// Format a file or every source unit of a project canonically
@@ -81,6 +90,7 @@ fn main() -> ExitCode {
         Command::Lsp => ExitCode::from(u8::try_from(aura_lsp::serve()).unwrap_or(1)),
         Command::Interp { path } => interp(&or_cwd(path)),
         Command::Bench { path, iters } => bench(&or_cwd(path), iters),
+        Command::Test { path, only } => test(path.as_deref(), only.as_deref()),
         Command::Fmt {
             path,
             check,
@@ -499,4 +509,217 @@ fn bench(path: &Path, iters: u32) -> ExitCode {
     } else {
         ExitCode::FAILURE
     }
+}
+
+// ----- aura test -------------------------------------------------------------
+
+/// One testsuite directory: `<NN>-<name>/` holding a `main.aura` file or
+/// a full `aura.toml` project, plus optional expectation files.
+struct Scenario {
+    dir: PathBuf,
+    /// `expected.diag` — a code like `E2001` the check must produce
+    /// (diagnostic-only scenario; nothing is compiled or run).
+    diag: Option<String>,
+    /// `expected.stdout` — exact stdout (CRLF-normalized, tail-trimmed).
+    stdout: Option<String>,
+    /// Per-engine stdout overrides.
+    stdout_compiled: Option<String>,
+    stdout_interp: Option<String>,
+    /// `expected.exit` — default `0`.
+    exit: i32,
+    exit_compiled: Option<i32>,
+    exit_interp: Option<i32>,
+    /// `stdin.txt` — fed to the process's stdin.
+    stdin: Vec<u8>,
+    /// `args.txt` — whitespace-split argv.
+    args: Vec<String>,
+    /// `skip.interp` marker — compiled-only scenario.
+    skip_interp: bool,
+    /// `interp.error` marker — interpreter must fail (any `InterpError`).
+    expect_interp_err: bool,
+}
+
+fn read_opt(dir: &Path, name: &str) -> Option<String> {
+    let p = dir.join(name);
+    std::fs::read_to_string(&p).ok()
+}
+
+fn read_marker(dir: &Path, name: &str) -> bool {
+    dir.join(name).is_file()
+}
+
+fn norm(s: &str) -> String {
+    s.replace("\r\n", "\n").trim_end().to_owned()
+}
+
+fn scenario(dir: &Path) -> Result<Scenario, String> {
+    if !dir.join("aura.toml").is_file() && !dir.join("main.aura").is_file() {
+        return Err(format!("{}: no main.aura or aura.toml", dir.display()));
+    }
+    let parse_i32 =
+        |f: &str| -> Option<i32> { read_opt(dir, f).and_then(|s| s.trim().parse::<i32>().ok()) };
+    Ok(Scenario {
+        diag: read_opt(dir, "expected.diag").map(|s| norm(&s)),
+        stdout: read_opt(dir, "expected.stdout").map(|s| norm(&s)),
+        stdout_compiled: read_opt(dir, "expected.stdout.compiled").map(|s| norm(&s)),
+        stdout_interp: read_opt(dir, "expected.stdout.interp").map(|s| norm(&s)),
+        exit: parse_i32("expected.exit").unwrap_or(0),
+        exit_compiled: parse_i32("expected.exit.compiled"),
+        exit_interp: parse_i32("expected.exit.interp"),
+        stdin: std::fs::read(dir.join("stdin.txt")).unwrap_or_default(),
+        args: read_opt(dir, "args.txt")
+            .map(|s| s.split_whitespace().map(str::to_owned).collect())
+            .unwrap_or_default(),
+        skip_interp: read_marker(dir, "skip.interp"),
+        expect_interp_err: read_marker(dir, "interp.error"),
+        dir: dir.to_path_buf(),
+    })
+}
+
+/// `want` vs `got` — first differing line index, for failure reports.
+fn first_diff(want: &str, got: &str) -> String {
+    for (i, (w, g)) in want.lines().zip(got.lines()).enumerate() {
+        if w != g {
+            return format!("line {}: want {w:?} got {g:?}", i + 1);
+        }
+    }
+    format!(
+        "length: want {} lines, got {} lines",
+        want.lines().count(),
+        got.lines().count()
+    )
+}
+
+fn run_scenario(dir: &Path) -> Result<(), String> {
+    let sc = scenario(dir)?;
+    let source = if sc.dir.join("aura.toml").is_file() {
+        sc.dir.clone()
+    } else {
+        sc.dir.join("main.aura")
+    };
+    let (db, project, cache) = load_project(&source)?;
+    let diags = check_project(&db, project);
+
+    // Diagnostic-only scenario: the check itself is the assertion.
+    if let Some(code) = &sc.diag {
+        if diags.iter().any(|d| d.code == Some(code.as_str())) {
+            return Ok(());
+        }
+        return Err(format!(
+            "{code} not produced ({} diagnostics emitted)",
+            diags.len()
+        ));
+    }
+    if render(diags.as_slice(), &cache) {
+        return Err("semantic errors".into());
+    }
+
+    // Compiled engine.
+    let (obj_bytes, _c) = compile(&source).ok_or("compile failed")?;
+    let (tmp, exe) = link_temp_exe(&obj_bytes).ok_or("link failed")?;
+    let mut cmd = std::process::Command::new(&exe);
+    cmd.current_dir(&sc.dir)
+        .args(&sc.args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = cmd.spawn().map_err(|e| format!("spawn: {e}"))?;
+    if let Some(mut w) = child.stdin.take() {
+        let _ = w.write_all(&sc.stdin);
+    }
+    let out = child.wait_with_output().map_err(|e| format!("wait: {e}"))?;
+    let _ = std::fs::remove_dir_all(&tmp);
+
+    let want_exit = sc.exit_compiled.unwrap_or(sc.exit);
+    if out.status.code() != Some(want_exit) {
+        return Err(format!(
+            "compiled exit: want {want_exit}, got {:?}",
+            out.status.code()
+        ));
+    }
+    let want_out = sc.stdout_compiled.as_ref().or(sc.stdout.as_ref());
+    if let Some(w) = want_out {
+        let got = norm(&String::from_utf8_lossy(&out.stdout));
+        if got != *w {
+            return Err(format!("compiled stdout: {}", first_diff(w, &got)));
+        }
+    }
+
+    // Interp engine.
+    if sc.skip_interp {
+        return Ok(());
+    }
+    let cap = aura_interp::run_project_capture(&db, project);
+    match (&cap.result, sc.expect_interp_err) {
+        (Err(_), true) => {}
+        (Err(e), false) => return Err(format!("interp error: {e}")),
+        (Ok(code), true) => return Err(format!("interp should error, got exit {code}")),
+        (Ok(code), false) => {
+            let want = sc.exit_interp.unwrap_or(sc.exit);
+            if *code != i64::from(want) {
+                return Err(format!("interp exit: want {want}, got {code}"));
+            }
+        }
+    }
+    let want_out = sc.stdout_interp.as_ref().or(sc.stdout.as_ref());
+    if let Some(w) = want_out {
+        let got = norm(&String::from_utf8_lossy(&cap.stdout));
+        if got != *w {
+            return Err(format!("interp stdout: {}", first_diff(w, &got)));
+        }
+    }
+    Ok(())
+}
+
+fn test(path: Option<&Path>, only: Option<&str>) -> ExitCode {
+    let root = path.map_or_else(|| PathBuf::from("testsuite"), Path::to_path_buf);
+    let mut dirs: Vec<PathBuf> =
+        if root.join("main.aura").is_file() || root.join("aura.toml").is_file() {
+            vec![root.clone()]
+        } else {
+            match std::fs::read_dir(&root) {
+                Ok(rd) => rd
+                    .filter_map(|e| e.ok().map(|e| e.path()))
+                    .filter(|p| p.is_dir())
+                    .collect(),
+                Err(e) => {
+                    eprintln!("error: cannot read {}: {e}", root.display());
+                    return ExitCode::FAILURE;
+                }
+            }
+        };
+    dirs.sort();
+    if let Some(f) = only {
+        dirs.retain(|d| {
+            d.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.contains(f))
+        });
+    }
+    if dirs.is_empty() {
+        eprintln!("error: no scenarios found under {}", root.display());
+        return ExitCode::FAILURE;
+    }
+    let total = dirs.len();
+    let mut passed = 0;
+    for dir in &dirs {
+        let name = dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("?")
+            .to_owned();
+        match run_scenario(dir) {
+            Ok(()) => {
+                passed += 1;
+                println!("ok   {name}");
+            }
+            Err(e) => {
+                println!("FAIL {name}: {e}");
+                println!("{passed}/{total} scenarios passed — stopped at first failure");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    println!("{passed}/{total} scenarios passed");
+    ExitCode::SUCCESS
 }

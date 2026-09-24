@@ -84,7 +84,8 @@ fn enum_match_emits_object() {
 }
 
 #[test]
-fn i128_literal_blocks_codegen() {
+fn i128_literal_emits_object() {
+    // i128 lowers to clif I128 (constants sign-extend via iconcat).
     let db = AuraDatabase::with_event_log(false);
     let file = SourceFile::new(
         &db,
@@ -92,12 +93,8 @@ fn i128_literal_blocks_codegen() {
         FileId(0),
     );
     let out = compile_file(&db, file);
-    assert!(out.object.is_none());
-    assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.code == Some(aura_common::codes::CG_UNSUPPORTED))
-    );
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    assert!(out.object.is_some());
 }
 
 #[test]
@@ -223,4 +220,15 @@ fn args_env_import_runtime_symbols() {
             .any(|w| w == b"aura_rt_env"),
         "object must import aura_rt_env"
     );
+}
+
+#[test]
+fn i128_emits_object() {
+    // Found by testsuite/01-arith: i128 used to hit E3004 and (before the
+    // iconcat fix) an `iconst.i128` verifier panic.
+    let out = compile(
+        "fn main() -> i64 { let big: i128 = 1000000\n if big * big == 1000000000000 { 0 } else { 1 } }",
+    );
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    assert!(out.object.is_some());
 }

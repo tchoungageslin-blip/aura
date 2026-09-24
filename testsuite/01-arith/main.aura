@@ -1,0 +1,30 @@
+// 01-arith — integer arithmetic across widths, precedence, unary ops.
+fn main() -> i64 {
+    // precedence and associativity
+    if 2 + 3 * 4 != 14 { return 1 }
+    if (2 + 3) * 4 != 20 { return 2 }
+    if 20 - 8 - 4 != 8 { return 3 }
+    // integer division truncates toward zero; modulo
+    if 17 / 5 != 3 { return 4 }
+    if 17 % 5 != 2 { return 5 }
+    if -17 / 5 != -3 { return 6 }
+    if -17 % 5 != -2 { return 7 }
+    // unary minus and parens
+    if -2 * -3 != 6 { return 8 }
+    if -(2 + 3) != -5 { return 9 }
+    // width annotations keep arithmetic in that width
+    let a: i32 = 2000000
+    if a * 3 != 6000000 { return 10 }
+    let b: u8 = 250
+    if b - 10 != 240 { return 11 }
+    let n: usize = 7
+    if n * n != 49 { return 12 }
+    let big: i128 = 1000000
+    if big * big != 1000000000000 { return 13 }
+    // comparisons + boolean ops feed control flow
+    let x = 6
+    if !(x > 4 && x < 10) { return 14 }
+    if !(x == 6 || x == 7) { return 15 }
+    println("arith ok")
+    0
+}
