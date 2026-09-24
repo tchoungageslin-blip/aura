@@ -18,7 +18,7 @@ Remove-Item -Recurse -Force $out -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $out | Out-Null
 
 # --- 1. static pages + assets -------------------------------------------------
-foreach ($f in 'index.html', 'download.html', 'learn.html', 'style.css', 'aura.js') {
+foreach ($f in 'index.html', 'download.html', 'learn.html', 'style.css', 'aura.js', 'i18n.js') {
     Copy-Item "$root/site/$f" "$out/$f"
 }
 foreach ($f in 'favicon.png', 'icon.png', 'social.png', 'aura.svg') {
@@ -41,10 +41,11 @@ $nav = @'
 <nav>
   <a class="brand" href="index.html"><img src="icon.png" alt="A" width="28" height="28"> Aura</a>
   <div>
-    <a href="learn.html">Learn</a>
+    <a href="learn.html"><span class="len">Learn</span><span class="lfr">Apprendre</span></a>
     <a href="docs/">Docs</a>
-    <a href="errors.html">Errors</a>
-    <a href="download.html" class="cta">Download</a>
+    <a href="examples.html"><span class="len">Examples</span><span class="lfr">Exemples</span></a>
+    <a href="errors.html"><span class="len">Errors</span><span class="lfr">Erreurs</span></a>
+    <a href="download.html" class="cta"><span class="len">Download</span><span class="lfr">T&eacute;l&eacute;charger</span></a>
   </div>
 </nav>
 '@
@@ -62,22 +63,159 @@ $errorsHtml = @"
 <body>
 $nav
 <article>
-<h1>Error Index</h1>
-<p>Every Aura diagnostic carries a stable code. Offline:
+<h1><span class="len">Error Index</span><span class="lfr">Index des erreurs</span></h1>
+<p><span class="len">Every Aura diagnostic carries a stable code. Offline:
 <code>aura doc E2101</code> prints the full entry; <code>aura doc errors</code>
 prints the whole index. Detailed text + fixes:
-<a href="docs/errors.html">docs/errors.html</a>.</p>
+<a href="docs/errors.html">docs/errors.html</a>. Entries below mirror the
+CLI output, so they stay in English.</span><span class="lfr">Chaque diagnostic Aura porte un code stable. Hors ligne :
+<code>aura doc E2101</code> affiche l'entr&eacute;e compl&egrave;te ;
+<code>aura doc errors</code> affiche tout l'index. Texte d&eacute;taill&eacute; + correctifs :
+<a href="docs/errors.html">docs/errors.html</a>. Les entr&eacute;es ci-dessous
+refl&egrave;tent la sortie du CLI, elles restent en anglais.</span></p>
 <table>
-<tr><th>Code</th><th>Meaning</th></tr>
+<tr><th>Code</th><th><span class="len">Meaning</span><span class="lfr">Signification</span></th></tr>
 $rows
 </table>
 </article>
-<footer><p>Generated from <code>docs/src/errors.md</code> - the same source the CLI embeds.</p></footer>
+<footer><p><span class="len">Generated from <code>docs/src/errors.md</code> - the same source the CLI embeds.</span><span class="lfr">G&eacute;n&eacute;r&eacute; depuis <code>docs/src/errors.md</code> - la m&ecirc;me source que le CLI embarque.</span></p></footer>
+<script src="i18n.js"></script>
 <script src="aura.js"></script>
 </body>
 </html>
 "@
 Set-Content "$out/errors.html" $errorsHtml -Encoding UTF8
+
+# --- 2b. examples.html generated from testsuite/ -------------------------------
+# Each scenario dir provides: a leading //-comment description (source of
+# truth), .aura sources, and input files (stdin.txt, args.txt, ...).
+# FR descriptions + category names live in site/examples-fr.json (UTF-8).
+$fr = [IO.File]::ReadAllText("$root/site/examples-fr.json") | ConvertFrom-Json
+$gh = 'https://github.com/tchoungageslin-blip/aura/tree/master/testsuite'
+$categories = @(
+    @{ lo = 1;  hi = 10; id = 'basics';   en = 'Language basics' },
+    @{ lo = 11; hi = 20; id = 'algo';     en = 'Algorithms and data structures' },
+    @{ lo = 21; hi = 28; id = 'io';       en = 'I/O, files and system' },
+    @{ lo = 29; hi = 35; id = 'perf';     en = 'Performance' },
+    @{ lo = 36; hi = 40; id = 'sci';      en = 'Scientific computing' },
+    @{ lo = 41; hi = 45; id = 'apps';     en = 'Mini-applications' },
+    @{ lo = 46; hi = 48; id = 'projects'; en = 'Projects' },
+    @{ lo = 49; hi = 50; id = 'meta';     en = 'Meta' }
+)
+$catFr = @{}
+foreach ($p in $fr.cat.PSObject.Properties) { $catFr[$p.Name] = $p.Value }
+$descFr = @{}
+foreach ($p in $fr.desc.PSObject.Properties) { $descFr[$p.Name] = $p.Value }
+
+function Html([string]$s) { [System.Net.WebUtility]::HtmlEncode($s) }
+
+# Leading //-comment block of a .aura file = description text.
+function Get-Desc([string]$file, [string]$fallback) {
+    $desc = ''
+    foreach ($line in [IO.File]::ReadLines($file)) {
+        $t = $line.TrimEnd()
+        if ($t.StartsWith('//')) {
+            $desc += ' ' + $t.TrimStart('/').Trim()
+        } elseif ($t -eq '') {
+            if ($desc) { break }
+        } else { break }
+    }
+    # strip the "NN-name - " prefix (em-dash, \u2014 in .NET regex)
+    $desc = [regex]::Replace($desc.Trim(), '^[0-9]+-[a-z0-9-]+\s*\u2014?\s*', '')
+    if (-not $desc) { $fallback }
+    else { $desc }
+}
+
+$exRows = [System.Text.StringBuilder]::new()
+foreach ($dir in Get-ChildItem "$root/testsuite" -Directory | Sort-Object Name) {
+    $name = $dir.Name
+    $n = [int]($name -split '-')[0]
+    $auraFiles = Get-ChildItem $dir.FullName -Recurse -Filter *.aura | Sort-Object FullName
+    if (-not $auraFiles) { continue }
+    $descEn = Get-Desc $auraFiles[0].FullName "scenario $name"
+    $descFrt = if ($descFr.ContainsKey($name)) { $descFr[$name] } else { $descEn }
+
+    # inputs: everything that is not .aura / expected.* / aura.toml
+    $inputs = Get-ChildItem $dir.FullName -Recurse -File |
+        Where-Object { $_.Extension -ne '.aura' -and $_.Name -notlike 'expected*' -and $_.Name -ne 'aura.toml' } |
+        Sort-Object FullName
+
+    $srcLinks = foreach ($f in $auraFiles) {
+        $rel = $f.FullName.Substring($dir.FullName.Length + 1) -replace '\\', '/'
+        "<code>$rel</code>"
+    }
+    $ioNames = foreach ($f in $inputs) {
+        "<code>" + ($f.FullName.Substring($dir.FullName.Length + 1) -replace '\\', '/') + "</code>"
+    }
+
+    # new category heading?
+    foreach ($c in $categories) {
+        if ($n -eq $c.lo) {
+            $frName = $catFr[$c.id]
+            [void]$exRows.AppendLine(
+                "<h2 class=`"ex-cat`" id=`"cat-$n`"><span class=`"len`">$($c.en)</span><span class=`"lfr`">$frName</span></h2>")
+        }
+    }
+
+    [void]$exRows.AppendLine("<details class=`"ex`" id=`"$name`">")
+    [void]$exRows.AppendLine(
+        "<summary><code>$name</code> - <span class=`"len`">$(Html $descEn)</span><span class=`"lfr`">$(Html $descFrt)</span></summary>")
+    [void]$exRows.AppendLine('<div class="exbody">')
+    $meta = "<a href=`"$gh/$name`">testsuite/$name</a> : " + ($srcLinks -join ' ')
+    if ($ioNames) {
+        $meta += " &middot; <span class=`"len`">inputs</span><span class=`"lfr`">entr&eacute;es</span>: " + ($ioNames -join ' ')
+    }
+    [void]$exRows.AppendLine("<p class=`"exmeta`">$meta</p>")
+
+    foreach ($f in $auraFiles) {
+        $rel = $f.FullName.Substring($dir.FullName.Length + 1) -replace '\\', '/'
+        $code = Html ([IO.File]::ReadAllText($f.FullName))
+        if ($auraFiles.Count -gt 1) {
+            [void]$exRows.AppendLine("<p class=`"io`"><b>$rel</b></p>")
+        }
+        [void]$exRows.AppendLine("<pre><code class=`"aura`">$code</code></pre>")
+    }
+    foreach ($f in $inputs) {
+        $rel = $f.FullName.Substring($dir.FullName.Length + 1) -replace '\\', '/'
+        $lines = [IO.File]::ReadAllLines($f.FullName)
+        if ($lines.Count -le 25 -and $f.Length -lt 4096) {
+            $code = Html ($lines -join "`n")
+            [void]$exRows.AppendLine("<p class=`"io`"><b>$rel</b></p><pre><code>$code</code></pre>")
+        }
+    }
+    [void]$exRows.AppendLine('</div></details>')
+}
+
+$examplesHtml = @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Examples - Aura</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+$nav
+<article style="max-width:900px">
+<h1><span class="len">50 examples</span><span class="lfr">50 exemples</span></h1>
+<p><span class="len">Every program below is real: it compiles, runs and
+produces the expected output in CI - this page is generated from the
+same <code>testsuite/</code> files the differential suite executes.
+Click a scenario to unfold its source.</span><span class="lfr">Chaque programme ci-dessous est r&eacute;el : il compile, s'ex&eacute;cute et
+produit la sortie attendue en CI - cette page est g&eacute;n&eacute;r&eacute;e depuis les
+m&ecirc;mes fichiers <code>testsuite/</code> que la suite diff&eacute;rentielle ex&eacute;cute.
+Clique sur un sc&eacute;nario pour d&eacute;plier sa source.</span></p>
+$exRows
+</article>
+<footer><p><span class="len">Generated from <code>testsuite/</code> - exercised by <code>aura test</code> on every commit.</span><span class="lfr">G&eacute;n&eacute;r&eacute; depuis <code>testsuite/</code> - exerc&eacute; par <code>aura test</code> &agrave; chaque commit.</span></p></footer>
+<script src="i18n.js"></script>
+<script src="aura.js"></script>
+</body>
+</html>
+"@
+Set-Content "$out/examples.html" $examplesHtml -Encoding UTF8
 
 # --- 3. docs/ via mdBook ------------------------------------------------------
 $docsOut = Join-Path $out 'docs'

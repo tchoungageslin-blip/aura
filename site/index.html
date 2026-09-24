@@ -12,26 +12,28 @@
 <nav>
   <a class="brand" href="index.html"><img src="icon.png" alt="A" width="28" height="28"> Aura</a>
   <div>
-    <a href="learn.html">Learn</a>
+    <a href="learn.html"><span class="len">Learn</span><span class="lfr">Apprendre</span></a>
     <a href="docs/">Docs</a>
-    <a href="errors.html">Errors</a>
-    <a href="download.html" class="cta">Download</a>
+    <a href="examples.html"><span class="len">Examples</span><span class="lfr">Exemples</span></a>
+    <a href="errors.html"><span class="len">Errors</span><span class="lfr">Erreurs</span></a>
+    <a href="download.html" class="cta"><span class="len">Download</span><span class="lfr">Télécharger</span></a>
   </div>
 </nav>
 
 <header class="hero">
   <h1><span class="big-a">A</span>ura</h1>
-  <p class="tagline">A small, statically-typed, compiled language.<br>
-  Native executables. Instant interpreter. Zero dependencies.</p>
+  <p class="tagline"><span class="len">A small, statically-typed, compiled language.<br>
+  Native executables. Instant interpreter. Zero dependencies.</span><span class="lfr">Un petit langage compilé, à typage statique.<br>
+  Exécutables natifs. Interpréteur instantané. Zéro dépendance.</span></p>
   <p class="actions">
-    <a class="btn primary" href="download.html">Download for Windows</a>
-    <a class="btn" href="learn.html">Learn in 15 minutes</a>
+    <a class="btn primary" href="download.html"><span class="len">Download for Windows</span><span class="lfr">Télécharger pour Windows</span></a>
+    <a class="btn" href="learn.html"><span class="len">Learn in 15 minutes</span><span class="lfr">Apprendre en 15 minutes</span></a>
   </p>
   <p class="meta">v0.1.0-alpha · Windows x86_64 · MIT/Apache-2.0</p>
 </header>
 
 <section class="panel">
-  <h2>60 seconds of Aura</h2>
+  <h2><span class="len">60 seconds of Aura</span><span class="lfr">60 secondes d'Aura</span></h2>
 <pre><code class="aura">fn square(x: i64) -&gt; i64 { x * x }
 
 fn main() -&gt; i64 {
@@ -46,43 +48,53 @@ fn main() -&gt; i64 {
     }
     return 0
 }</code></pre>
-  <p class="caption">No semicolons. `if` and `match` are expressions.
-  `Result` + `?` for errors. <a href="learn.html">Full tour →</a></p>
+  <p class="caption"><span class="len">No semicolons. `if` and `match` are expressions.
+  `Result` + `?` for errors.</span><span class="lfr">Pas de points-virgules. `if` et `match` sont des expressions.
+  `Result` + `?` pour les erreurs.</span> <a href="learn.html"><span class="len">Full tour →</span><span class="lfr">Tour complet →</span></a></p>
 </section>
 
 <section class="grid">
   <div class="card">
-    <h3>Compiled &amp; interpreted</h3>
-    <p><code>aura run</code> interprets for iteration speed;
+    <h3><span class="len">Compiled &amp; interpreted</span><span class="lfr">Compilé &amp; interprété</span></h3>
+    <p><span class="len"><code>aura interp</code> interprets for iteration speed;
     <code>aura build</code> emits a native <code>.exe</code> through
     Cranelift + LLD. Same observable behavior — proven by a 50-scenario
-    differential suite.</p>
+    differential suite.</span><span class="lfr"><code>aura interp</code> interprète pour itérer vite ;
+    <code>aura build</code> émet un <code>.exe</code> natif via
+    Cranelift + LLD. Comportement observable identique — prouvé par une
+    suite différentielle de 50 scénarios.</span></p>
   </div>
   <div class="card">
-    <h3>Batteries included</h3>
-    <p>Strings, growable vectors, files, stdin, process args,
+    <h3><span class="len">Batteries included</span><span class="lfr">Batteries incluses</span></h3>
+    <p><span class="len">Strings, growable vectors, files, stdin, process args,
     environment variables, subprocess spawn — in the prelude, no
-    imports needed. <a href="docs/stdlib.html">std reference →</a></p>
+    imports needed.</span><span class="lfr">Chaînes, vecteurs extensibles, fichiers, stdin, arguments,
+    variables d'environnement, lancement de processus — dans le prélude,
+    sans import.</span> <a href="docs/stdlib.html"><span class="len">std reference →</span><span class="lfr">référence std →</span></a></p>
   </div>
   <div class="card">
-    <h3>Self-contained</h3>
-    <p>The installer ships the linker and runtime. No Rust, no Visual
+    <h3><span class="len">Self-contained</span><span class="lfr">Autonome</span></h3>
+    <p><span class="len">The installer ships the linker and runtime. No Rust, no Visual
     Studio, no admin rights. One <code>aura.exe</code> is the whole
-    toolchain.</p>
+    toolchain.</span><span class="lfr">L'installeur embarque le linker et le runtime. Pas de Rust, pas de
+    Visual Studio, pas de droits admin. Un seul <code>aura.exe</code> =
+    toute la chaîne.</span></p>
   </div>
   <div class="card">
-    <h3>Honest errors</h3>
-    <p>Every diagnostic carries a stable code —
+    <h3><span class="len">Honest errors</span><span class="lfr">Erreurs honnêtes</span></h3>
+    <p><span class="len">Every diagnostic carries a stable code —
     <code>aura doc E2101</code> explains it offline, and the
-    <a href="errors.html">error index</a> lists all of them.</p>
+    </span><span class="lfr">Chaque diagnostic porte un code stable —
+    <code>aura doc E2101</code> l'explique hors ligne, et l'</span><a href="errors.html"><span class="len">error index</span><span class="lfr">index des erreurs</span></a><span class="len"> lists all of them.</span><span class="lfr"> les liste toutes.</span></p>
   </div>
 </section>
 
 <footer>
-  <p>Aura is alpha software — expect sharp edges.
-  <a href="https://github.com/tchoungageslin-blip/aura">Source on GitHub</a> ·
-  <a href="docs/internals.html">How the compiler works</a></p>
+  <p><span class="len">Aura is alpha software — expect sharp edges.</span><span class="lfr">Aura est un logiciel alpha — attendez-vous à des angles vifs.</span>
+  <a href="https://github.com/tchoungageslin-blip/aura"><span class="len">Source on GitHub</span><span class="lfr">Source sur GitHub</span></a> ·
+  <a href="docs/internals.html"><span class="len">How the compiler works</span><span class="lfr">Comment marche le compilateur</span></a></p>
 </footer>
+<script src="i18n.js"></script>
 <script src="aura.js"></script>
 </body>
 </html>

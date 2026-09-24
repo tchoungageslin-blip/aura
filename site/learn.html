@@ -11,26 +11,44 @@
 <nav>
   <a class="brand" href="index.html"><img src="icon.png" alt="A" width="28" height="28"> Aura</a>
   <div>
-    <a href="learn.html">Learn</a>
+    <a href="learn.html"><span class="len">Learn</span><span class="lfr">Apprendre</span></a>
     <a href="docs/">Docs</a>
-    <a href="errors.html">Errors</a>
-    <a href="download.html" class="cta">Download</a>
+    <a href="examples.html"><span class="len">Examples</span><span class="lfr">Exemples</span></a>
+    <a href="errors.html"><span class="len">Errors</span><span class="lfr">Erreurs</span></a>
+    <a href="download.html" class="cta"><span class="len">Download</span><span class="lfr">Télécharger</span></a>
   </div>
 </nav>
 
 <article>
-<h1>Learn Aura</h1>
-<p>The full walkthrough lives in the docs — this page is the fast path.</p>
+<h1><span class="len">Learn Aura</span><span class="lfr">Apprendre Aura</span></h1>
+<p><span class="len">A numbered path from install to your first real tool.
+The full reference lives in the <a href="docs/">docs</a>; complete
+programs are in <a href="examples.html">Examples</a>.</span><span class="lfr">Un parcours numéroté, de l'installation à ton premier vrai outil.
+La référence complète est dans les <a href="docs/">docs</a> ; des
+programmes entiers sont dans <a href="examples.html">Exemples</a>.</span></p>
 
-<h2>1 · New project</h2>
+<h2><span class="len">0 · Install</span><span class="lfr">0 · Installer</span></h2>
+<p><span class="len">Grab <code>AuraSetup-*.exe</code> on
+<a href="download.html">Download</a> — the wizard puts <code>aura</code>
+on your PATH. No Rust, no Visual Studio, no admin rights.</span><span class="lfr">Récupère <code>AuraSetup-*.exe</code> sur
+<a href="download.html">Télécharger</a> — l'assistant met <code>aura</code>
+dans ton PATH. Pas de Rust, pas de Visual Studio, pas de droits admin.</span></p>
+
+<h2><span class="len">1 · First program</span><span class="lfr">1 · Premier programme</span></h2>
 <pre><code>aura new hello
 cd hello
 aura run</code></pre>
-<p><code>aura run</code> interprets <code>main</code> directly.
-<code>aura build</code> produces <code>build/hello.exe</code>;
-<code>aura check</code> type-checks without running.</p>
+<p><span class="len">prints <code>Hello, Aura!</code>. <code>aura run</code>
+compiles, links a native <code>.exe</code> and runs it;
+<code>aura interp</code> interprets the same program without linking;
+<code>aura check</code> type-checks without running;
+<code>aura build</code> leaves <code>build/hello.exe</code> on disk.</span><span class="lfr">affiche <code>Hello, Aura!</code>. <code>aura run</code>
+compile, lie un <code>.exe</code> natif et l'exécute ;
+<code>aura interp</code> interprète le même programme sans édition de liens ;
+<code>aura check</code> vérifie les types sans exécuter ;
+<code>aura build</code> laisse <code>build/hello.exe</code> sur le disque.</span></p>
 
-<h2>2 · The tour</h2>
+<h2><span class="len">2 · The tour</span><span class="lfr">2 · Le tour</span></h2>
 <pre><code class="aura">fn square(x: i64) -&gt; i64 { x * x }
 
 fn might_fail(ok: bool) -&gt; Result&lt;i64, str&gt; {
@@ -53,25 +71,65 @@ fn main() -&gt; i64 {
     }
     return 0
 }</code></pre>
+<p><span class="len">Statements are separated by newlines; the last
+expression is the value of a block. Strings and numbers are different
+types — convert with <code>str_from_int</code>.</span><span class="lfr">Les instructions sont séparées par des retours à la ligne ;
+la dernière expression est la valeur d'un bloc. Chaînes et nombres sont
+des types distincts — convertis avec <code>str_from_int</code>.</span></p>
 
-<h2>3 · Keep going</h2>
+<h2><span class="len">3 · Your first tool</span><span class="lfr">3 · Ton premier outil</span></h2>
+<p><span class="len">A <code>wc -l</code> clone — save as
+<code>wordcount.aura</code>, then
+<code>Get-Content file | aura run wordcount.aura</code>:</span><span class="lfr">Un clone de <code>wc -l</code> — sauvegarde sous
+<code>wordcount.aura</code>, puis
+<code>Get-Content fichier | aura run wordcount.aura</code> :</span></p>
+<pre><code class="aura">fn main() -&gt; i64 {
+    let inp = read_stdin()
+    let mut lines = 0
+    let mut i = 0
+    while i &lt; inp.len {
+        if str_get(inp, i) == 10 {   // byte 10 = '\n'
+            lines = lines + 1
+        }
+        i = i + 1
+    }
+    println("lines: " + str_from_int(lines))
+    0
+}</code></pre>
+
+<h2><span class="len">4 · Keep going</span><span class="lfr">4 · Aller plus loin</span></h2>
 <table>
-  <tr><th>You want</th><th>Read</th></tr>
-  <tr><td>Every type, operator, construct</td><td><a href="docs/language.html">The Language</a></td></tr>
-  <tr><td>Builtins — files, args, env, exec, vec</td><td><a href="docs/stdlib.html">Standard Library</a></td></tr>
-  <tr><td>Idioms + worked recipes</td><td><a href="docs/effective-aura.html">Effective Aura</a></td></tr>
-  <tr><td>What an error code means</td><td><a href="errors.html">Error index</a> or <code>aura doc E2101</code></td></tr>
-  <tr><td>How the compiler works</td><td><a href="docs/internals.html">Internals</a></td></tr>
-  <tr><td>En français</td><td><a href="docs/fr/demarrage.html">Démarrage</a></td></tr>
+  <tr><th><span class="len">You want</span><span class="lfr">Tu veux</span></th><th><span class="len">Read</span><span class="lfr">Lis</span></th></tr>
+  <tr><td><span class="len">Every type, operator, construct</span><span class="lfr">Chaque type, opérateur, construction</span></td><td><a href="docs/language.html">The Language</a></td></tr>
+  <tr><td><span class="len">Builtins — files, args, env, exec, vec</span><span class="lfr">Builtins — fichiers, args, env, exec, vec</span></td><td><a href="docs/stdlib.html">Standard Library</a></td></tr>
+  <tr><td><span class="len">Guided builds: CLI tool, KV store…</span><span class="lfr">Constructions guidées : outil CLI, KV store…</span></td><td><a href="docs/tutorials/">Tutorials</a></td></tr>
+  <tr><td><span class="len">50 complete, tested programs</span><span class="lfr">50 programmes complets et testés</span></td><td><a href="examples.html"><span class="len">Examples</span><span class="lfr">Exemples</span></a></td></tr>
+  <tr><td><span class="len">Idioms + worked recipes</span><span class="lfr">Idiomes + recettes détaillées</span></td><td><a href="docs/effective-aura.html">Effective Aura</a></td></tr>
+  <tr><td><span class="len">What an error code means</span><span class="lfr">Ce que veut dire un code d'erreur</span></td><td><a href="errors.html"><span class="len">Error index</span><span class="lfr">Index des erreurs</span></a> or <code>aura doc E2101</code></td></tr>
+  <tr><td><span class="len">How the compiler works</span><span class="lfr">Comment marche le compilateur</span></td><td><a href="docs/internals.html">Internals</a></td></tr>
+  <tr><td><span class="len">En français</span><span class="lfr">En français</span></td><td><a href="docs/fr/demarrage.html">Démarrage</a></td></tr>
 </table>
 
-<h2>4 · In your editor</h2>
-<p>Install the <code>.vsix</code> (see <a href="download.html">Download</a>)
-and you get inline diagnostics with the same codes, hover docs for every
-builtin, go-to-definition, outline, and formatting via <code>aura fmt</code>.</p>
+<h2><span class="len">5 · Exercises</span><span class="lfr">5 · Exercices</span></h2>
+<p><span class="len">Extend the word counter — count words and bytes too
+(split on space 32). Then try a <code>SET/GET</code> key-value loop on
+stdin: <a href="examples.html">43-kv</a> shows the full solution.</span><span class="lfr">Étends le compteur — compte aussi les mots et les octets
+(sépare sur l'espace 32). Puis tente une boucle clé-valeur
+<code>SET/GET</code> sur stdin : <a href="examples.html">43-kv</a> montre
+la solution complète.</span></p>
+
+<h2><span class="len">6 · In your editor</span><span class="lfr">6 · Dans ton éditeur</span></h2>
+<p><span class="len">Install the <code>.vsix</code> (see
+<a href="download.html">Download</a>) for inline diagnostics with the
+same codes, hover docs for every builtin, go-to-definition, outline,
+and <code>aura fmt</code>.</span><span class="lfr">Installe le <code>.vsix</code> (voir
+<a href="download.html">Télécharger</a>) pour les diagnostics en ligne
+avec les mêmes codes, la doc au survol de chaque builtin, go-to-definition,
+outline, et <code>aura fmt</code>.</span></p>
 </article>
 
-<footer><p>Examples are extracted from the docs and compiled in CI — they can't drift.</p></footer>
+<footer><p><span class="len">Examples are extracted from the docs and compiled in CI — they can't drift.</span><span class="lfr">Les exemples sont extraits des docs et compilés en CI — ils ne peuvent pas dériver.</span></p></footer>
+<script src="i18n.js"></script>
 <script src="aura.js"></script>
 </body>
 </html>

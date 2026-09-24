@@ -11,52 +11,64 @@
 <nav>
   <a class="brand" href="index.html"><img src="icon.png" alt="A" width="28" height="28"> Aura</a>
   <div>
-    <a href="learn.html">Learn</a>
+    <a href="learn.html"><span class="len">Learn</span><span class="lfr">Apprendre</span></a>
     <a href="docs/">Docs</a>
-    <a href="errors.html">Errors</a>
-    <a href="download.html" class="cta">Download</a>
+    <a href="examples.html"><span class="len">Examples</span><span class="lfr">Exemples</span></a>
+    <a href="errors.html"><span class="len">Errors</span><span class="lfr">Erreurs</span></a>
+    <a href="download.html" class="cta"><span class="len">Download</span><span class="lfr">Télécharger</span></a>
   </div>
 </nav>
 
 <article>
-<h1>Download Aura</h1>
-<p>Windows x86_64 · v0.1.0-alpha · MIT / Apache-2.0 dual-licensed.</p>
+<h1><span class="len">Download Aura</span><span class="lfr">Télécharger Aura</span></h1>
+<p><span class="len">Windows x86_64 · v0.1.0-alpha · MIT / Apache-2.0 dual-licensed.</span><span class="lfr">Windows x86_64 · v0.1.0-alpha · double licence MIT / Apache-2.0.</span></p>
 
-<h2>Recommended: the installer</h2>
+<h2><span class="len">Recommended: the installer</span><span class="lfr">Recommandé : l'installeur</span></h2>
 <p><a class="btn primary" href="https://github.com/tchoungageslin-blip/aura/releases/latest">AuraSetup-0.1.0-alpha.exe</a></p>
-<p>A setup wizard: chooses an install directory (default
+<p><span class="len">A setup wizard: chooses an install directory (default
 <code>%LOCALAPPDATA%\Programs\Aura</code>), adds <code>aura</code> to
 your PATH, optionally associates <code>.aura</code> files, and can
-install the VS Code extension. No administrator rights needed.</p>
+install the VS Code extension. No administrator rights needed.</span><span class="lfr">Un assistant d'installation : choisit un dossier (par défaut
+<code>%LOCALAPPDATA%\Programs\Aura</code>), ajoute <code>aura</code> à
+ton PATH, associe optionnellement les fichiers <code>.aura</code>, et peut
+installer l'extension VS Code. Pas de droits administrateur requis.</span></p>
 
-<h2>Portable ZIP</h2>
+<h2><span class="len">Portable ZIP</span><span class="lfr">ZIP portable</span></h2>
 <p><a class="btn" href="https://github.com/tchoungageslin-blip/aura/releases/latest">aura-0.1.0-alpha-windows-x86_64.zip</a></p>
-<p>Unzip anywhere, add the folder to PATH. Contains
+<p><span class="len">Unzip anywhere, add the folder to PATH. Contains
 <code>aura.exe</code>, the runtime, the bundled linker, the VS Code
-extension (<code>.vsix</code>), examples and the documentation.</p>
+extension (<code>.vsix</code>), examples and the documentation.</span><span class="lfr">Dézippe n'importe où, ajoute le dossier au PATH. Contient
+<code>aura.exe</code>, le runtime, le linker embarqué, l'extension VS Code
+(<code>.vsix</code>), des exemples et la documentation.</span></p>
 
-<h2>Verify your download</h2>
-<p>Each release publishes <code>SHA256SUMS.txt</code>. On Windows:</p>
+<h2><span class="len">Verify your download</span><span class="lfr">Vérifier le téléchargement</span></h2>
+<p><span class="len">Each release publishes <code>SHA256SUMS.txt</code>. On Windows:</span><span class="lfr">Chaque release publie <code>SHA256SUMS.txt</code>. Sous Windows :</span></p>
 <pre><code>certutil -hashfile AuraSetup-0.1.0-alpha.exe SHA256</code></pre>
-<p>Compare the hash with the matching line in SHA256SUMS.txt.</p>
+<p><span class="len">Compare the hash with the matching line in SHA256SUMS.txt.</span><span class="lfr">Compare le hash avec la ligne correspondante dans SHA256SUMS.txt.</span></p>
 
-<h2>First run</h2>
+<h2><span class="len">First run</span><span class="lfr">Premier lancement</span></h2>
 <pre><code>aura --version
 aura new hello
 cd hello
 aura run</code></pre>
-<p>Windows SmartScreen may warn on first launch (unsigned alpha
-binary): <em>More info → Run anyway</em>.</p>
+<p><span class="len">Windows SmartScreen may warn on first launch (unsigned alpha
+binary): <em>More info → Run anyway</em>.</span><span class="lfr">Windows SmartScreen peut avertir au premier lancement (binaire
+alpha non signé) : <em>Informations complémentaires → Exécuter quand même</em>.</span></p>
 
-<h2>VS Code extension</h2>
-<p>In VS Code: <code>Ctrl+Shift+P → Extensions: Install from VSIX…</code>
+<h2><span class="len">VS Code extension</span><span class="lfr">Extension VS Code</span></h2>
+<p><span class="len">In VS Code: <code>Ctrl+Shift+P → Extensions: Install from VSIX…</code>
 and pick <code>editors/vscode/aura-lang-0.1.0.vsix</code> from the
 package — or let the installer do it. The extension gives you
 diagnostics, hover, go-to-definition, document outline and formatting,
-powered by <code>aura lsp</code>.</p>
+powered by <code>aura lsp</code>.</span><span class="lfr">Dans VS Code : <code>Ctrl+Shift+P → Extensions: Install from VSIX…</code>
+et choisis <code>editors/vscode/aura-lang-0.1.0.vsix</code> dans le
+package — ou laisse l'installeur le faire. L'extension donne diagnostics,
+doc au survol, go-to-definition, outline et formatage,
+via <code>aura lsp</code>.</span></p>
 </article>
 
-<footer><p><a href="https://github.com/tchoungageslin-blip/aura">Source on GitHub</a></p></footer>
+<footer><p><a href="https://github.com/tchoungageslin-blip/aura"><span class="len">Source on GitHub</span><span class="lfr">Source sur GitHub</span></a></p></footer>
+<script src="i18n.js"></script>
 <script src="aura.js"></script>
 </body>
 </html>
