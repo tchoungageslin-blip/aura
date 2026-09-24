@@ -129,6 +129,10 @@ const DOC_PAGES: &[(&str, &str)] = &[
     ("toolchain", include_str!("../../../docs/src/toolchain.md")),
     ("stdlib", include_str!("../../../docs/src/stdlib.md")),
     ("errors", include_str!("../../../docs/src/errors.md")),
+    (
+        "effective",
+        include_str!("../../../docs/src/effective-aura.md"),
+    ),
     ("internals", include_str!("../../../docs/src/internals.md")),
 ];
 

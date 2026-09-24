@@ -90,7 +90,7 @@ retour (`return` marche aussi).
 | chaînes → nombres | `str_get(s, i)`, `str_slice(s, a, b)` |
 | nombres → chaînes | `str_from_int(n)`, `str_from_f64(x)` (`%.6f`) |
 | vecteurs | `vec_new()`, `vec_push`, `vec_get`, `vec_set`, `vec_pop` |
-| fichiers | `read_file(path)`, `write_file(path, s)` → `Result` |
+| fichiers | `read_file(path)` → `Result`, `write_file(path, s)` → `bool` |
 | système | `args()`, `env(name)`, `exec(cmd)`, `read_stdin()` |
 | maths | `sqrt(x)`, `f64_from_int(n)` |
 | processus | `exit(code)` |

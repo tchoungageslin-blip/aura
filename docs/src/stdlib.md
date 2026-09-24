@@ -19,7 +19,7 @@ A user-defined function with the same name shadows the builtin.
 | Builtin | Effect |
 |---------|--------|
 | `read_file(path: str) -> Result<str, str>` | whole file as `str`; `Err(msg)` on failure |
-| `write_file(path: str, data: str) -> Result<bool, str>` | write `data`; `Ok(true)` on success |
+| `write_file(path: str, data: str) -> bool` | write `data`; `true` on success |
 
 Paths are relative to the process working directory. Both engines
 resolve them identically.

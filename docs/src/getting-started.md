@@ -87,7 +87,7 @@ expression of a function is its return value (`return` also works).
 | strings → numbers | `str_get(s, i)`, `str_slice(s, a, b)` |
 | numbers → strings | `str_from_int(n)`, `str_from_f64(x)` (`%.6f`) |
 | vectors | `vec_new()`, `vec_push`, `vec_get`, `vec_set`, `vec_pop` |
-| files | `read_file(path)`, `write_file(path, s)` → `Result` |
+| files | `read_file(path)` → `Result`, `write_file(path, s)` → `bool` |
 | system | `args()`, `env(name)`, `exec(cmd)`, `read_stdin()` |
 | math | `sqrt(x)`, `f64_from_int(n)` |
 | process | `exit(code)` |

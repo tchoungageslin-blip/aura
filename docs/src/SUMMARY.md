@@ -7,5 +7,6 @@
 - [The Toolchain](./toolchain.md)
 - [Standard Library](./stdlib.md)
 - [Error Index](./errors.md)
+- [Effective Aura](./effective-aura.md)
 - [Compiler Internals](./internals.md)
 - [The Megaplan](./megaplan.md)

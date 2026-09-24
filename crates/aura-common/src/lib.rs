@@ -155,7 +155,7 @@ impl BuiltinFn {
                 "read_file(path: str) -> Result<str, str>\nWhole file contents; Err(msg) on OS failure."
             }
             Self::WriteFile => {
-                "write_file(path: str, data: str) -> Result<bool, str>\nCreate/truncate and write; Ok(true) on success."
+                "write_file(path: str, data: str) -> bool\nCreate/truncate and write; true on success, false on failure."
             }
             Self::ReadStdin => "read_stdin() -> str\nAll of stdin until EOF.",
             Self::Exec => {
