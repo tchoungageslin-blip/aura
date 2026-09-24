@@ -26,8 +26,13 @@
     "languages": [
       {
         "id": "aura",
-        "aliases": ["Aura", "aura"],
-        "extensions": [".aura"],
+        "aliases": [
+          "Aura",
+          "aura"
+        ],
+        "extensions": [
+          ".aura"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -48,7 +53,11 @@
         },
         "aura.trace.server": {
           "type": "string",
-          "enum": ["off", "messages", "verbose"],
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
           "default": "off",
           "description": "Trace LSP messages in the Aura output channel."
         }
@@ -57,5 +66,8 @@
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.6.0"
   }
 }

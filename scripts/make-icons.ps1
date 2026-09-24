@@ -92,4 +92,14 @@ $w.Flush()
 [System.IO.File]::WriteAllBytes((Join-Path $outDir 'aura.ico'), $ms.ToArray())
 $w.Dispose(); $ms.Dispose()
 
+# --- wizard.bmp: 55x58 for Inno's WizardSmallImageFile -------------------------
+$wb = New-Object System.Drawing.Bitmap 55, 58
+$g = [System.Drawing.Graphics]::FromImage($wb)
+$g.SmoothingMode = 'AntiAlias'
+$g.Clear([System.Drawing.Color]::White)
+$mark = New-AuraBitmap 48
+$g.DrawImage($mark, 4, 5, 48, 48)
+$wb.Save((Join-Path $outDir 'wizard.bmp'), [System.Drawing.Imaging.ImageFormat]::Bmp)
+$mark.Dispose(); $g.Dispose(); $wb.Dispose()
+
 Get-ChildItem $outDir | ForEach-Object { "{0,10} {1}" -f $_.Length, $_.Name }

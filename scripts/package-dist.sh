@@ -41,7 +41,7 @@ cp packaging/README.txt "$pkg/README.txt"
 cp bench/*.aura "$pkg/bench/"
 cp LICENSE-MIT LICENSE-APACHE "$pkg/"
 cp licenses/LICENSE.lld.txt "$pkg/licenses/"
-[[ -d docs/src ]] && { mkdir -p "$pkg/docs"; cp docs/src/*.md "$pkg/docs/"; }
+[[ -d docs/src ]] && { cp -r docs/src "$pkg/docs"; }
 for v in editors/vscode/*.vsix; do
   [[ -f "$v" ]] && cp "$v" "$pkg/"
 done

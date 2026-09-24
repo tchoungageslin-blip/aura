@@ -22,3 +22,8 @@ dist/
 # VS Code extension build artifacts
 editors/vscode/node_modules/
 *.vsix
+
+# Installer + site build outputs
+installer/AuraSetup-*.exe
+installer/install.log
+site/dist/

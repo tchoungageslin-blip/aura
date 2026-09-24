@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Download — Aura</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav>
+  <a class="brand" href="index.html"><img src="icon.png" alt="A" width="28" height="28"> Aura</a>
+  <div>
+    <a href="learn.html">Learn</a>
+    <a href="docs/">Docs</a>
+    <a href="errors.html">Errors</a>
+    <a href="download.html" class="cta">Download</a>
+  </div>
+</nav>
+
+<article>
+<h1>Download Aura</h1>
+<p>Windows x86_64 · v0.1.0-alpha · MIT / Apache-2.0 dual-licensed.</p>
+
+<h2>Recommended: the installer</h2>
+<p><a class="btn primary" href="https://github.com/aura-lang/aura/releases/latest">AuraSetup-0.1.0-alpha.exe</a></p>
+<p>A setup wizard: chooses an install directory (default
+<code>%LOCALAPPDATA%\Programs\Aura</code>), adds <code>aura</code> to
+your PATH, optionally associates <code>.aura</code> files, and can
+install the VS Code extension. No administrator rights needed.</p>
+
+<h2>Portable ZIP</h2>
+<p><a class="btn" href="https://github.com/aura-lang/aura/releases/latest">aura-0.1.0-alpha-windows-x86_64.zip</a></p>
+<p>Unzip anywhere, add the folder to PATH. Contains
+<code>aura.exe</code>, the runtime, the bundled linker, the VS Code
+extension (<code>.vsix</code>), examples and the documentation.</p>
+
+<h2>Verify your download</h2>
+<p>Each release publishes <code>SHA256SUMS.txt</code>. On Windows:</p>
+<pre><code>certutil -hashfile AuraSetup-0.1.0-alpha.exe SHA256</code></pre>
+<p>Compare the hash with the matching line in SHA256SUMS.txt.</p>
+
+<h2>First run</h2>
+<pre><code>aura --version
+aura new hello
+cd hello
+aura run</code></pre>
+<p>Windows SmartScreen may warn on first launch (unsigned alpha
+binary): <em>More info → Run anyway</em>.</p>
+
+<h2>VS Code extension</h2>
+<p>In VS Code: <code>Ctrl+Shift+P → Extensions: Install from VSIX…</code>
+and pick <code>editors/vscode/aura-lang-0.1.0.vsix</code> from the
+package — or let the installer do it. The extension gives you
+diagnostics, hover, go-to-definition, document outline and formatting,
+powered by <code>aura lsp</code>.</p>
+</article>
+
+<footer><p><a href="https://github.com/aura-lang/aura">Source on GitHub</a></p></footer>
+<script src="aura.js"></script>
+</body>
+</html>

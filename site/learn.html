@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Learn Aura — Aura</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav>
+  <a class="brand" href="index.html"><img src="icon.png" alt="A" width="28" height="28"> Aura</a>
+  <div>
+    <a href="learn.html">Learn</a>
+    <a href="docs/">Docs</a>
+    <a href="errors.html">Errors</a>
+    <a href="download.html" class="cta">Download</a>
+  </div>
+</nav>
+
+<article>
+<h1>Learn Aura</h1>
+<p>The full walkthrough lives in the docs — this page is the fast path.</p>
+
+<h2>1 · New project</h2>
+<pre><code>aura new hello
+cd hello
+aura run</code></pre>
+<p><code>aura run</code> interprets <code>main</code> directly.
+<code>aura build</code> produces <code>build/hello.exe</code>;
+<code>aura check</code> type-checks without running.</p>
+
+<h2>2 · The tour</h2>
+<pre><code class="aura">fn square(x: i64) -&gt; i64 { x * x }
+
+fn might_fail(ok: bool) -&gt; Result&lt;i64, str&gt; {
+    if ok { Ok(42) } else { Err("nope") }
+}
+
+fn main() -&gt; i64 {
+    let name = "world"          // inferred, immutable
+    let mut count = 0           // `mut` makes it assignable
+
+    // `if` is an expression
+    let label = if count &gt; 0 { "yes" } else { "no" }
+    while count &lt; 10 { count = count + 1 }
+
+    println("hello " + name)
+    println(str_from_int(square(7)))
+    match might_fail(true) {
+        Ok(v)  =&gt; println(str_from_int(v)),
+        Err(e) =&gt; eprintln(e),
+    }
+    return 0
+}</code></pre>
+
+<h2>3 · Keep going</h2>
+<table>
+  <tr><th>You want</th><th>Read</th></tr>
+  <tr><td>Every type, operator, construct</td><td><a href="docs/language.html">The Language</a></td></tr>
+  <tr><td>Builtins — files, args, env, exec, vec</td><td><a href="docs/stdlib.html">Standard Library</a></td></tr>
+  <tr><td>Idioms + worked recipes</td><td><a href="docs/effective-aura.html">Effective Aura</a></td></tr>
+  <tr><td>What an error code means</td><td><a href="errors.html">Error index</a> or <code>aura doc E2101</code></td></tr>
+  <tr><td>How the compiler works</td><td><a href="docs/internals.html">Internals</a></td></tr>
+  <tr><td>En français</td><td><a href="docs/fr/demarrage.html">Démarrage</a></td></tr>
+</table>
+
+<h2>4 · In your editor</h2>
+<p>Install the <code>.vsix</code> (see <a href="download.html">Download</a>)
+and you get inline diagnostics with the same codes, hover docs for every
+builtin, go-to-definition, outline, and formatting via <code>aura fmt</code>.</p>
+</article>
+
+<footer><p>Examples are extracted from the docs and compiled in CI — they can't drift.</p></footer>
+<script src="aura.js"></script>
+</body>
+</html>

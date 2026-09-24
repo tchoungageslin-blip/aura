@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aura — a compiled systems language</title>
+<meta name="description" content="Aura is a small statically-typed compiled language: native executables, instant interpretation, zero dependencies.">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav>
+  <a class="brand" href="index.html"><img src="icon.png" alt="A" width="28" height="28"> Aura</a>
+  <div>
+    <a href="learn.html">Learn</a>
+    <a href="docs/">Docs</a>
+    <a href="errors.html">Errors</a>
+    <a href="download.html" class="cta">Download</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <h1><span class="big-a">A</span>ura</h1>
+  <p class="tagline">A small, statically-typed, compiled language.<br>
+  Native executables. Instant interpreter. Zero dependencies.</p>
+  <p class="actions">
+    <a class="btn primary" href="download.html">Download for Windows</a>
+    <a class="btn" href="learn.html">Learn in 15 minutes</a>
+  </p>
+  <p class="meta">v0.1.0-alpha · Windows x86_64 · MIT/Apache-2.0</p>
+</header>
+
+<section class="panel">
+  <h2>60 seconds of Aura</h2>
+<pre><code class="aura">fn square(x: i64) -&gt; i64 { x * x }
+
+fn main() -&gt; i64 {
+    let scores = vec_new()
+    vec_push(scores, square(7))
+    while scores.len &lt; 5 {
+        vec_push(scores, vec_get(scores, scores.len - 1) + 1)
+    }
+    match read_file("data.txt") {
+        Ok(t)  =&gt; println(t),
+        Err(e) =&gt; eprintln("nope: " + e),
+    }
+    return 0
+}</code></pre>
+  <p class="caption">No semicolons. `if` and `match` are expressions.
+  `Result` + `?` for errors. <a href="learn.html">Full tour →</a></p>
+</section>
+
+<section class="grid">
+  <div class="card">
+    <h3>Compiled &amp; interpreted</h3>
+    <p><code>aura run</code> interprets for iteration speed;
+    <code>aura build</code> emits a native <code>.exe</code> through
+    Cranelift + LLD. Same observable behavior — proven by a 50-scenario
+    differential suite.</p>
+  </div>
+  <div class="card">
+    <h3>Batteries included</h3>
+    <p>Strings, growable vectors, files, stdin, process args,
+    environment variables, subprocess spawn — in the prelude, no
+    imports needed. <a href="docs/stdlib.html">std reference →</a></p>
+  </div>
+  <div class="card">
+    <h3>Self-contained</h3>
+    <p>The installer ships the linker and runtime. No Rust, no Visual
+    Studio, no admin rights. One <code>aura.exe</code> is the whole
+    toolchain.</p>
+  </div>
+  <div class="card">
+    <h3>Honest errors</h3>
+    <p>Every diagnostic carries a stable code —
+    <code>aura doc E2101</code> explains it offline, and the
+    <a href="errors.html">error index</a> lists all of them.</p>
+  </div>
+</section>
+
+<footer>
+  <p>Aura is alpha software — expect sharp edges.
+  <a href="https://github.com/aura-lang/aura">Source on GitHub</a> ·
+  <a href="docs/internals.html">How the compiler works</a></p>
+</footer>
+<script src="aura.js"></script>
+</body>
+</html>
