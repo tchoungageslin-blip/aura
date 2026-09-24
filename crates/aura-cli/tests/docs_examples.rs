@@ -20,7 +20,7 @@ fn all_diags(src: &str) -> Vec<aura_common::Diagnostic> {
     let db = AuraDatabase::new();
     let file = SourceFile::new(&db, src.to_owned(), FileId(0));
     let ds = check_file(&db, file).clone();
-    if ds.iter().any(|d| d.is_error()) {
+    if ds.iter().any(aura_common::Diagnostic::is_error) {
         return ds;
     }
     let mut out = ds;
@@ -123,7 +123,11 @@ fn docs_examples_match_the_compiler() {
                 let src = wrap_if_fragment(&block);
                 // Compile-blocks must type-check; fail-blocks go
                 // through codegen too so E3xxx codes are reachable.
-                let ds = if fail_block { all_diags(&src) } else { diags(&src) };
+                let ds = if fail_block {
+                    all_diags(&src)
+                } else {
+                    diags(&src)
+                };
                 let loc = format!("{}:{}", path.display(), block_start);
                 if fail_block {
                     assert!(
@@ -134,7 +138,7 @@ fn docs_examples_match_the_compiler() {
                     // Inside errors.md a block must emit its section code.
                     if path.file_name().unwrap() == "errors.md" && !current_code.is_empty() {
                         assert!(
-                            ds.iter().any(|d| d.code.as_deref() == Some(&*current_code)),
+                            ds.iter().any(|d| d.code == Some(current_code.as_str())),
                             "{loc}: expected {current_code}, got {:?}:\n{block}",
                             ds.iter().filter_map(|d| d.code).collect::<Vec<_>>()
                         );

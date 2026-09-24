@@ -8,5 +8,6 @@
 - [Standard Library](./stdlib.md)
 - [Error Index](./errors.md)
 - [Effective Aura](./effective-aura.md)
+- [Releasing](./releasing.md)
 - [Compiler Internals](./internals.md)
 - [The Megaplan](./megaplan.md)
