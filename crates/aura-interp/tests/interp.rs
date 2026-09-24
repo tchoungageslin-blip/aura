@@ -326,3 +326,71 @@ fn main() -> i64 {
 }";
     assert_eq!(run(src), 0);
 }
+
+// --- RunConfig-injected environment (the `aura test` contract) ---
+
+use aura_interp::{RunConfig, run_parsed_capture};
+
+fn capture(src: &str, cfg: RunConfig) -> (i64, Vec<u8>) {
+    let parsed = aura_parser::parse_file(src, aura_common::FileId(0));
+    let c = run_parsed_capture(&parsed, cfg);
+    (c.result.expect("interp"), c.stdout)
+}
+
+#[test]
+fn read_stdin_injected_and_drains() {
+    let src = "fn main() -> i64 { let a = read_stdin()\n let b = read_stdin()\n if a == \"data\" && b.len == 0 { 7 } else { 0 } }";
+    let (code, _) = capture(
+        src,
+        RunConfig {
+            stdin: Some(b"data".to_vec()),
+            ..RunConfig::default()
+        },
+    );
+    assert_eq!(code, 7);
+}
+
+#[test]
+fn file_io_relative_to_cwd() {
+    let dir = std::env::temp_dir().join(format!("aura-it-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let src = "fn main() -> i64 { if !write_file(\"t.txt\", \"xyz\") { return 1 }\n match read_file(\"t.txt\") { Ok(c) => if c == \"xyz\" { 3 } else { 4 }, Err(e) => 5 } }";
+    let (code, _) = capture(
+        src,
+        RunConfig {
+            cwd: Some(dir.clone()),
+            ..RunConfig::default()
+        },
+    );
+    assert_eq!(code, 3);
+    // Wrote into the injected cwd, and the Err path returns Variant.
+    assert_eq!(std::fs::read_to_string(dir.join("t.txt")).unwrap(), "xyz");
+    let (code2, _) = capture(
+        "fn main() -> i64 { match read_file(\"missing.txt\") { Ok(c) => 1, Err(e) => 9 } }",
+        RunConfig {
+            cwd: Some(dir.clone()),
+            ..RunConfig::default()
+        },
+    );
+    assert_eq!(code2, 9);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn args_injected() {
+    let src = "fn main() -> i64 { let a = args()\n if a.len == 3 && vec_get(a, 1) == \"one\" && vec_get(a, 2) == \"two\" { 6 } else { 0 } }";
+    let (code, _) = capture(
+        src,
+        RunConfig {
+            args: Some(vec!["prog".to_owned(), "one".to_owned(), "two".to_owned()]),
+            ..RunConfig::default()
+        },
+    );
+    assert_eq!(code, 6);
+}
+
+#[test]
+fn str_from_byte_builds_bytes() {
+    let src = "fn main() -> i64 { let s = str_from_byte(72) + str_from_byte(105)\n if s == \"Hi\" && s.len == 2 { 4 } else { 0 } }";
+    assert_eq!(run(src), 4);
+}

@@ -74,6 +74,75 @@ unsafe extern "C" {
         wide: *mut u16,
         wide_len: i32,
     ) -> i32;
+    fn CreateFileW(
+        name: *const u16,
+        access: u32,
+        share: u32,
+        security: *mut c_void,
+        creation: u32,
+        flags: u32,
+        template: *mut c_void,
+    ) -> *mut c_void;
+    fn GetFileSizeEx(handle: *mut c_void, size: *mut i64) -> i32;
+    fn ReadFile(
+        handle: *mut c_void,
+        buf: *mut c_void,
+        len: u32,
+        read: *mut u32,
+        overlapped: *mut c_void,
+    ) -> i32;
+    fn CloseHandle(handle: *mut c_void) -> i32;
+    fn CreateProcessW(
+        app: *const u16,
+        cmdline: *mut u16,
+        proc_attr: *mut c_void,
+        thread_attr: *mut c_void,
+        inherit: i32,
+        flags: u32,
+        env: *mut c_void,
+        cwd: *const u16,
+        si: *mut StartupInfoW,
+        pi: *mut ProcessInfo,
+    ) -> i32;
+    fn WaitForSingleObject(handle: *mut c_void, ms: u32) -> u32;
+    fn GetExitCodeProcess(handle: *mut c_void, code: *mut u32) -> i32;
+}
+
+/// `STARTUPINFOW` — 104 bytes on x64; `cb` is the byte size, the std
+/// handles sit at the tail.
+#[cfg(target_os = "windows")]
+#[repr(C)]
+pub struct StartupInfoW {
+    cb: u32,
+    _pad0: u32,
+    reserved: *const u16,
+    desktop: *const u16,
+    title: *const u16,
+    x: u32,
+    y: u32,
+    x_size: u32,
+    y_size: u32,
+    x_count: u32,
+    y_count: u32,
+    fill: u32,
+    flags: u32,
+    show: u16,
+    reserved2: u16,
+    _pad1: u32,
+    reserved3: *mut c_void,
+    std_in: *mut c_void,
+    std_out: *mut c_void,
+    std_err: *mut c_void,
+}
+
+/// `PROCESS_INFORMATION` — `{hProcess, hThread, pid, tid}`.
+#[cfg(target_os = "windows")]
+#[repr(C)]
+pub struct ProcessInfo {
+    process: *mut c_void,
+    thread: *mut c_void,
+    pid: u32,
+    tid: u32,
 }
 
 #[cfg(target_os = "windows")]
@@ -829,4 +898,370 @@ pub unsafe extern "C" fn aura_str_from_bool(v: u8, out: *mut RawStr) {
         memcpy(p.cast(), s.cast(), n);
         *out = RawStr { ptr: p, len: n };
     }
+}
+
+/// `str_from_byte(v)` — a one-byte string holding `v`'s low 8 bits.
+///
+/// # Safety
+/// `out` must point to a `RawStr`.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_str_from_byte(v: i64, out: *mut RawStr) {
+    if out.is_null() {
+        return;
+    }
+    let p = aura_rt_alloc(1);
+    if p.is_null() {
+        unsafe { ExitProcess(14) };
+    }
+    unsafe {
+        *p = v as u8;
+        *out = RawStr { ptr: p, len: 1 };
+    }
+}
+
+// ----- file / process io ---------------------------------------------------------
+
+/// `Result<str, str>` as the runtime writes it — `i32` tag at 0,
+/// payload `RawStr` at 8 (matches `result_layout`: tag 4B aligned to
+/// the 8B payload).
+#[cfg(target_os = "windows")]
+#[repr(C)]
+pub struct RawResultStr {
+    tag: i32,
+    _pad: i32,
+    payload: RawStr,
+}
+
+/// UTF-8 → freshly allocated NUL-terminated UTF-16 — paths and command
+/// lines for the `*W` APIs. `aura_rt_alloc`-owned; null on failure.
+#[cfg(target_os = "windows")]
+unsafe fn utf8_to_wstr(ptr: *const u8, len: usize) -> *mut u16 {
+    if len == 0 {
+        let buf = aura_rt_alloc(2).cast::<u16>();
+        if !buf.is_null() {
+            unsafe { *buf = 0 };
+        }
+        return buf;
+    }
+    let need = unsafe {
+        MultiByteToWideChar(
+            CP_UTF8,
+            0,
+            ptr,
+            i32::try_from(len).unwrap_or(i32::MAX),
+            core::ptr::null_mut(),
+            0,
+        )
+    };
+    if need <= 0 {
+        return core::ptr::null_mut();
+    }
+    let n = usize::try_from(need).unwrap_or(0);
+    let buf = aura_rt_alloc((n + 1) * 2).cast::<u16>();
+    if buf.is_null() {
+        return buf;
+    }
+    unsafe {
+        MultiByteToWideChar(
+            CP_UTF8,
+            0,
+            ptr,
+            i32::try_from(len).unwrap_or(i32::MAX),
+            buf,
+            need,
+        );
+        *buf.add(n) = 0;
+    }
+    buf
+}
+
+/// `read_file(path) -> Result<str, str>` — whole file as bytes. The
+/// `Err` payload is a static message (no allocation) so callers can
+/// match on it; the OS error detail isn't surfaced yet.
+///
+/// # Safety
+/// `path` must be valid for `path_len` bytes; `out` writable for a
+/// `RawResultStr`.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_read_file(
+    path: *const u8,
+    path_len: usize,
+    out: *mut RawResultStr,
+) {
+    const GENERIC_READ: u32 = 0x8000_0000;
+    const FILE_SHARE_READ: u32 = 0x1;
+    const OPEN_EXISTING: u32 = 3;
+    unsafe fn err(out: *mut RawResultStr, msg: &'static [u8]) {
+        unsafe {
+            *out = RawResultStr {
+                tag: 1,
+                _pad: 0,
+                payload: RawStr {
+                    ptr: msg.as_ptr().cast_mut(),
+                    len: msg.len(),
+                },
+            }
+        };
+    }
+    if out.is_null() {
+        return;
+    }
+    let w = unsafe { utf8_to_wstr(path, path_len) };
+    if w.is_null() {
+        unsafe { err(out, b"bad path") };
+        return;
+    }
+    let h = unsafe {
+        CreateFileW(
+            w,
+            GENERIC_READ,
+            FILE_SHARE_READ,
+            core::ptr::null_mut(),
+            OPEN_EXISTING,
+            0,
+            core::ptr::null_mut(),
+        )
+    };
+    unsafe { aura_rt_free(w.cast()) };
+    if h.is_null() || h == (-1isize as *mut c_void) {
+        unsafe { err(out, b"cannot open file") };
+        return;
+    }
+    let mut size: i64 = 0;
+    if unsafe { GetFileSizeEx(h, &mut size) } == 0 || size < 0 {
+        unsafe { CloseHandle(h) };
+        unsafe { err(out, b"cannot stat file") };
+        return;
+    }
+    let total_size = usize::try_from(size).unwrap_or(usize::MAX);
+    let buf = aura_rt_alloc(total_size.saturating_add(1));
+    if buf.is_null() && total_size != 0 {
+        unsafe { CloseHandle(h) };
+        unsafe { err(out, b"out of memory") };
+        return;
+    }
+    let mut total = 0usize;
+    while total < total_size {
+        let chunk = u32::try_from(total_size - total).unwrap_or(u32::MAX);
+        let mut n: u32 = 0;
+        let ok = unsafe {
+            ReadFile(
+                h,
+                buf.add(total).cast(),
+                chunk,
+                &mut n,
+                core::ptr::null_mut(),
+            )
+        };
+        if ok == 0 || n == 0 {
+            unsafe { CloseHandle(h) };
+            unsafe { err(out, b"read failed") };
+            return;
+        }
+        total += usize::try_from(n).unwrap_or(0);
+    }
+    unsafe { CloseHandle(h) };
+    unsafe {
+        *out = RawResultStr {
+            tag: 0,
+            _pad: 0,
+            payload: RawStr {
+                ptr: buf,
+                len: total,
+            },
+        }
+    };
+}
+
+/// `write_file(path, data) -> bool` — create/truncate then write all
+/// bytes; `0` on any OS failure.
+///
+/// # Safety
+/// `path`/`data` must be valid for their lengths.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_write_file(
+    path: *const u8,
+    path_len: usize,
+    data: *const u8,
+    data_len: usize,
+) -> i32 {
+    const GENERIC_WRITE: u32 = 0x4000_0000;
+    const CREATE_ALWAYS: u32 = 2;
+    let w = unsafe { utf8_to_wstr(path, path_len) };
+    if w.is_null() {
+        return 0;
+    }
+    let h = unsafe {
+        CreateFileW(
+            w,
+            GENERIC_WRITE,
+            0,
+            core::ptr::null_mut(),
+            CREATE_ALWAYS,
+            0,
+            core::ptr::null_mut(),
+        )
+    };
+    unsafe { aura_rt_free(w.cast()) };
+    if h.is_null() || h == (-1isize as *mut c_void) {
+        return 0;
+    }
+    let mut total = 0usize;
+    while total < data_len {
+        let chunk = u32::try_from(data_len - total).unwrap_or(u32::MAX);
+        let mut n: u32 = 0;
+        let ok = unsafe {
+            WriteFile(
+                h,
+                data.add(total).cast(),
+                chunk,
+                &mut n,
+                core::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            unsafe { CloseHandle(h) };
+            return 0;
+        }
+        total += usize::try_from(n).unwrap_or(0);
+        if n == 0 {
+            break;
+        }
+    }
+    unsafe { CloseHandle(h) };
+    i32::from(total == data_len)
+}
+
+/// `read_stdin() -> str` — drain stdin to EOF into a growing heap
+/// buffer. No stdin / closed stdin yields `{null, 0}`.
+///
+/// # Safety
+/// `out` must be writable for a `RawStr`.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_read_stdin(out: *mut RawStr) {
+    const STD_INPUT_HANDLE: i32 = -10;
+    if out.is_null() {
+        return;
+    }
+    let empty = RawStr {
+        ptr: core::ptr::null_mut(),
+        len: 0,
+    };
+    let h = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
+    if h.is_null() || h == (-1isize as *mut c_void) {
+        unsafe { *out = empty };
+        return;
+    }
+    let mut cap = 4096usize;
+    let mut buf = aura_rt_alloc(cap);
+    if buf.is_null() {
+        unsafe { *out = empty };
+        return;
+    }
+    let mut total = 0usize;
+    loop {
+        if total == cap {
+            let ncap = cap.saturating_mul(2);
+            let nb = unsafe {
+                HeapReAlloc(GetProcessHeap(), 0, buf.cast(), ncap).cast::<u8>()
+            };
+            if nb.is_null() {
+                break;
+            }
+            buf = nb;
+            cap = ncap;
+        }
+        let mut n: u32 = 0;
+        let ok = unsafe {
+            ReadFile(
+                h,
+                buf.add(total).cast(),
+                u32::try_from(cap - total).unwrap_or(u32::MAX),
+                &mut n,
+                core::ptr::null_mut(),
+            )
+        };
+        if ok == 0 || n == 0 {
+            break;
+        }
+        total += usize::try_from(n).unwrap_or(0);
+    }
+    unsafe { *out = RawStr { ptr: buf, len: total } };
+}
+
+/// `exec(cmd) -> i64` — `CreateProcessW` with the string as the command
+/// line, wait, return the child's exit code; `-1` on spawn failure.
+/// The child inherits no std handles (STARTF_USESTDHANDLES + null
+/// handles) so its output can't interleave with the parent's — a
+/// program's `exec` contract is the exit code plus file system effects.
+///
+/// # Safety
+/// `cmd` must be valid for `cmd_len` bytes.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_exec(cmd: *const u8, cmd_len: usize) -> i64 {
+    const STARTF_USESTDHANDLES: u32 = 0x100;
+    const INFINITE: u32 = 0xFFFF_FFFF;
+    let w = unsafe { utf8_to_wstr(cmd, cmd_len) };
+    if w.is_null() {
+        return -1;
+    }
+    let mut si = StartupInfoW {
+        cb: u32::try_from(core::mem::size_of::<StartupInfoW>()).unwrap_or(104),
+        _pad0: 0,
+        reserved: core::ptr::null(),
+        desktop: core::ptr::null(),
+        title: core::ptr::null(),
+        x: 0,
+        y: 0,
+        x_size: 0,
+        y_size: 0,
+        x_count: 0,
+        y_count: 0,
+        fill: 0,
+        flags: STARTF_USESTDHANDLES,
+        show: 0,
+        reserved2: 0,
+        _pad1: 0,
+        reserved3: core::ptr::null_mut(),
+        std_in: core::ptr::null_mut(),
+        std_out: core::ptr::null_mut(),
+        std_err: core::ptr::null_mut(),
+    };
+    let mut pi = ProcessInfo {
+        process: core::ptr::null_mut(),
+        thread: core::ptr::null_mut(),
+        pid: 0,
+        tid: 0,
+    };
+    let ok = unsafe {
+        CreateProcessW(
+            core::ptr::null(),
+            w,
+            core::ptr::null_mut(),
+            core::ptr::null_mut(),
+            0,
+            0,
+            core::ptr::null_mut(),
+            core::ptr::null(),
+            &mut si,
+            &mut pi,
+        )
+    };
+    unsafe { aura_rt_free(w.cast()) };
+    if ok == 0 {
+        return -1;
+    }
+    unsafe { WaitForSingleObject(pi.process, INFINITE) };
+    let mut code: u32 = 0;
+    unsafe { GetExitCodeProcess(pi.process, &mut code) };
+    unsafe {
+        CloseHandle(pi.process);
+        CloseHandle(pi.thread);
+    }
+    i64::from(code)
 }

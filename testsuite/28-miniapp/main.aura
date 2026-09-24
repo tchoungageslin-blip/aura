@@ -1,0 +1,35 @@
+// 28-miniapp — composite: args + env + stdin + files + exec.
+// Reads a config file for a count, consumes stdin, appends a
+// summary line to the config, executes a child, reports status.
+fn main() -> i64 {
+    let a = args()
+    // args.txt = "run" -> argv = [prog, run]
+    if a.len != 2 { return 1 }
+    if vec_get(a, 1) != "run" { return 2 }
+
+    match read_file("config.txt") {
+        Ok(c) => {
+            // config holds a number as text: "5"
+            let n_str = str_slice(c, 0, 1)
+            if n_str != "5" { return 3 }
+            let n = str_get(n_str, 0) - 48
+            // consume stdin fully
+            let inp = read_stdin()
+            // append a summary to the config file
+            let summary = c + "input_len=" + str_from_int(inp.len) + "\n"
+            if !write_file("config.txt", summary) { return 4 }
+            // child side effect: marker file
+            if exec("cmd /c echo ran>marker.txt") != 0 { return 5 }
+            match read_file("marker.txt") {
+                Ok(m) => {
+                    if str_slice(m, 0, 3) != "ran" { return 6 }
+                },
+                Err(e) => exit(7),
+            }
+            println("processed " + str_from_int(n) + " items, " + str_from_int(inp.len) + " bytes")
+        },
+        Err(e) => exit(8),
+    }
+    println("miniapp ok")
+    return 0
+}

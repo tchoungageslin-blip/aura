@@ -151,8 +151,11 @@ pub fn run_parsed(parsed: &aura_parser::ParsedFile) -> Result<i64, InterpError> 
 
 /// Like [`run_parsed`] but returns everything the program wrote to
 /// stdout/stderr instead of forwarding it — for `aura test` and tools.
-pub fn run_parsed_capture(parsed: &aura_parser::ParsedFile) -> Captured {
-    run_files_capture(&[parsed])
+/// `cfg` injects the process environment (`read_stdin` input, working
+/// directory for relative file paths, `args()` argv); defaults run on
+/// the real process environment.
+pub fn run_parsed_capture(parsed: &aura_parser::ParsedFile, cfg: RunConfig) -> Captured {
+    run_files_capture(&[parsed], cfg)
 }
 
 /// Interpret `main` across a project's files (flat namespace — dep items
@@ -174,21 +177,22 @@ pub fn run_project(
 }
 
 /// Like [`run_project`] but captures stdout/stderr — see
-/// [`run_parsed_capture`].
+/// [`run_parsed_capture`] for `cfg`.
 pub fn run_project_capture(
     db: &dyn aura_salsa_db::Db,
     project: aura_salsa_db::Project,
+    cfg: RunConfig,
 ) -> Captured {
     let files: Vec<&aura_parser::ParsedFile> = project
         .files(db)
         .iter()
         .map(|f| aura_salsa_db::parsed(db, *f))
         .collect();
-    run_files_capture(&files)
+    run_files_capture(&files, cfg)
 }
 
 fn run_files(files: &[&aura_parser::ParsedFile]) -> Result<i64, InterpError> {
-    let c = run_files_capture(files);
+    let c = run_files_capture(files, RunConfig::default());
     emit_captured(&c);
     c.result
 }
@@ -201,7 +205,7 @@ fn emit_captured(c: &Captured) {
     let _ = std::io::stderr().flush();
 }
 
-fn run_files_capture(files: &[&aura_parser::ParsedFile]) -> Captured {
+fn run_files_capture(files: &[&aura_parser::ParsedFile], cfg: RunConfig) -> Captured {
     // Deep Aura recursion is Rust recursion here — the default 1–8 MB
     // thread stack overflows on real programs (fib(25) ≈ 240k calls).
     // Run on a dedicated 256 MB stack; `scope` joins before returning.
@@ -211,7 +215,7 @@ fn run_files_capture(files: &[&aura_parser::ParsedFile]) -> Captured {
         let r = std::thread::Builder::new()
             .stack_size(256 * 1024 * 1024)
             .spawn_scoped(s, || {
-                let (res, out, err) = run_files_inner(files);
+                let (res, out, err) = run_files_inner(files, cfg);
                 (res.map_err(|e| encode_err(&e)), out, err)
             });
         match r {
@@ -267,8 +271,9 @@ fn decode_err(tag: u8, msg: String) -> InterpError {
 
 fn run_files_inner(
     files: &[&aura_parser::ParsedFile],
+    cfg: RunConfig,
 ) -> (Result<i64, InterpError>, Vec<u8>, Vec<u8>) {
-    let mut interp = Interp::new(files);
+    let mut interp = Interp::new(files, cfg);
     let res = match interp.call_main() {
         Ok(Value::Int(v)) => {
             i64::try_from(v).map_err(|_| InterpError::Type("main result out of i64 range".into()))
@@ -333,12 +338,17 @@ enum Builtin {
     VecGet,
     VecSet,
     VecPop,
+    ReadFile,
+    WriteFile,
+    ReadStdin,
+    Exec,
     Args,
     Env,
     StrFromInt,
     StrFromBool,
     StrGet,
     StrSlice,
+    StrFromByte,
 }
 
 /// The interpreter: item tables plus a scope stack and fuel.
@@ -364,6 +374,63 @@ struct Interp<'a> {
     /// can inspect output (`run_*` flushes them to the real streams).
     out: Vec<u8>,
     err: Vec<u8>,
+    /// `read_stdin` source — see [`StdinIo`].
+    stdin: StdinIo,
+    /// Working directory for relative `read_file`/`write_file`/`exec`
+    /// paths — the compiled binary gets this via `current_dir`.
+    cwd: std::path::PathBuf,
+    /// `args()` argv — injected by the harness; `None` = real argv.
+    args: Option<Vec<String>>,
+}
+
+/// `read_stdin` backing state: `provided = Some` is harness-fed input;
+/// `None` reads the real process stdin lazily. `done` marks the first
+/// read — later calls get `""` (drained), matching the compiled OS read.
+struct StdinIo {
+    provided: Option<Vec<u8>>,
+    done: bool,
+}
+
+/// Process-environment inputs a host can inject — everything `aura
+/// test` fakes so interpreted runs match spawned binaries.
+#[derive(Default)]
+pub struct RunConfig {
+    /// `read_stdin` bytes; `None` = read the real stdin lazily.
+    pub stdin: Option<Vec<u8>>,
+    /// Working directory for relative file paths and `exec` children.
+    pub cwd: Option<std::path::PathBuf>,
+    /// `args()` result: `Some` = harness argv (program name included at
+    /// [0]); `None` = the real process argv.
+    pub args: Option<Vec<String>>,
+}
+
+/// Resolve `path` against `cwd` — relative paths root at the scenario
+/// dir (matching the compiled binary's `current_dir`).
+fn resolve_path(cwd: &std::path::Path, path: &str) -> std::path::PathBuf {
+    let p = std::path::Path::new(path);
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        cwd.join(p)
+    }
+}
+
+impl StdinIo {
+    /// Drain the source once; subsequent calls return empty.
+    fn read(&mut self) -> Vec<u8> {
+        use std::io::Read;
+        if self.done {
+            return Vec::new();
+        }
+        self.done = true;
+        if let Some(b) = self.provided.take() {
+            b
+        } else {
+            let mut v = Vec::new();
+            let _ = std::io::stdin().read_to_end(&mut v);
+            v
+        }
+    }
 }
 
 /// Output captured from an interpreted run: the result plus everything
@@ -377,7 +444,7 @@ pub struct Captured {
 const STEP_LIMIT: u64 = 5_000_000;
 
 impl<'a> Interp<'a> {
-    fn new(files: &[&'a aura_parser::ParsedFile]) -> Self {
+    fn new(files: &[&'a aura_parser::ParsedFile], cfg: RunConfig) -> Self {
         let mut this = Self {
             files: files.to_vec(),
             cur: 0,
@@ -389,6 +456,14 @@ impl<'a> Interp<'a> {
             steps: 0,
             out: Vec::new(),
             err: Vec::new(),
+            stdin: StdinIo {
+                provided: cfg.stdin,
+                done: false,
+            },
+            cwd: cfg
+                .cwd
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into())),
+            args: cfg.args,
         };
         for (fi, parsed) in this.files.iter().enumerate() {
             this.cur = fi;
@@ -880,13 +955,27 @@ impl<'a> Interp<'a> {
         }
         if self.builtins.contains(&cname) {
             let b = Builtin::by_name(&cname).expect("registered builtin");
-            return b.call(&vals, &mut self.out, &mut self.err);
+            return b.call(
+                &vals,
+                &mut self.out,
+                &mut self.err,
+                &mut self.stdin,
+                &self.cwd,
+                self.args.as_deref(),
+            );
         }
         let Some(&(fi, idx)) = self.fns.get(&cname) else {
             // Prelude builtins — reached only when no user fn/variant
             // claimed the name above, so user definitions shadow them.
             if let Some(b) = Builtin::by_name(&cname) {
-                return b.call(&vals, &mut self.out, &mut self.err);
+                return b.call(
+                    &vals,
+                    &mut self.out,
+                    &mut self.err,
+                    &mut self.stdin,
+                    &self.cwd,
+                    self.args.as_deref(),
+                );
             }
             return Err(InterpError::Unresolved(cname));
         };
@@ -973,7 +1062,12 @@ impl Builtin {
             "str_from_bool" => Some(Self::StrFromBool),
             "str_get" => Some(Self::StrGet),
             "str_slice" => Some(Self::StrSlice),
+            "str_from_byte" => Some(Self::StrFromByte),
             "vec_pop" => Some(Self::VecPop),
+            "read_file" => Some(Self::ReadFile),
+            "write_file" => Some(Self::WriteFile),
+            "read_stdin" => Some(Self::ReadStdin),
+            "exec" => Some(Self::Exec),
             _ => None,
         }
     }
@@ -983,6 +1077,9 @@ impl Builtin {
         args: &[Value],
         out: &mut dyn std::io::Write,
         err: &mut dyn std::io::Write,
+        stdin: &mut StdinIo,
+        cwd: &std::path::Path,
+        args_argv: Option<&[String]>,
     ) -> Result<Value, InterpError> {
         use std::io::Write;
         let mut write = |stderr: bool, s: &[u8], nl: bool| {
@@ -1044,9 +1141,13 @@ impl Builtin {
                     .ok_or(InterpError::Escape(Escape::Exit(101)))
             }
             (Self::Args, []) => Ok(Value::Vec(Rc::new(RefCell::new(
-                std::env::args()
-                    .map(|a| Value::Str(Rc::from(a.into_bytes())))
-                    .collect(),
+                match args_argv {
+                    Some(a) => a.to_vec(),
+                    None => std::env::args().collect(),
+                }
+                .into_iter()
+                .map(|a| Value::Str(Rc::from(a.into_bytes())))
+                .collect(),
             )))),
             (Self::Env, [Value::Str(name)]) => Ok(Value::Str(Rc::from(
                 std::env::var(std::str::from_utf8(name).unwrap_or_default())
@@ -1061,6 +1162,8 @@ impl Builtin {
             } else {
                 b"false".as_slice()
             }))),
+            // Low 8 bits of the i128 — the byte value.
+            (Self::StrFromByte, [Value::Int(v)]) => Ok(Value::Str(Rc::from([v.to_le_bytes()[0]]))),
             (Self::StrGet, [Value::Str(s), Value::Int(i)]) => {
                 let i = usize::try_from(*i).unwrap_or(usize::MAX);
                 // Compiled OOB is ExitProcess(101) — match it.
@@ -1075,6 +1178,61 @@ impl Builtin {
                     return Err(InterpError::Escape(Escape::Exit(101)));
                 }
                 Ok(Value::Str(Rc::from(&s[lo..hi])))
+            }
+            (Self::ReadFile | Self::WriteFile | Self::ReadStdin | Self::Exec, _) => {
+                self.file_proc_io(args, stdin, cwd)
+            }
+            _ => Err(InterpError::Type("bad builtin args".into())),
+        }
+    }
+
+    /// `read_file`/`write_file`/`read_stdin`/`exec` — the file and
+    /// process side of the builtin set, split out of `call` to keep
+    /// it under the line limit. Paths resolve against `cwd` so a
+    /// scenario's working dir matches the spawned binary's.
+    fn file_proc_io(
+        self,
+        args: &[Value],
+        stdin: &mut StdinIo,
+        cwd: &std::path::Path,
+    ) -> Result<Value, InterpError> {
+        match (self, args) {
+            (Self::ReadFile, [Value::Str(path)]) => {
+                let p = resolve_path(cwd, &String::from_utf8_lossy(path));
+                let (variant, payload) = match std::fs::read(&p) {
+                    Ok(b) => ("Ok", Value::Str(Rc::from(b))),
+                    Err(_) => ("Err", Value::Str(Rc::from(&b"cannot open file"[..]))),
+                };
+                Ok(Value::Variant {
+                    enum_name: "Result".into(),
+                    variant: variant.into(),
+                    fields: vec![payload],
+                })
+            }
+            (Self::WriteFile, [Value::Str(path), Value::Str(data)]) => {
+                let p = resolve_path(cwd, &String::from_utf8_lossy(path));
+                Ok(Value::Bool(std::fs::write(&p, data.as_ref()).is_ok()))
+            }
+            (Self::ReadStdin, []) => Ok(Value::Str(Rc::from(stdin.read()))),
+            (Self::Exec, [Value::Str(cmd)]) => {
+                let c = String::from_utf8_lossy(cmd).into_owned();
+                // Match CreateProcessW's split-on-whitespace cmdline
+                // parsing: first token is the program (resolved via
+                // PATH), the rest are args. Spawn failure → -1, like
+                // the runtime. Child output is captured and dropped —
+                // `exec`'s contract is the exit code.
+                let mut it = c.split_whitespace();
+                let code = match it.next() {
+                    None => -1,
+                    Some(prog) => std::process::Command::new(prog)
+                        .args(it)
+                        .current_dir(cwd)
+                        .output()
+                        .ok()
+                        .and_then(|o| o.status.code())
+                        .map_or(-1, i64::from),
+                };
+                Ok(Value::Int(i128::from(code)))
             }
             _ => Err(InterpError::Type("bad builtin args".into())),
         }

@@ -1,0 +1,32 @@
+// 27-copy — read a file, uppercase ASCII bytes, write it back out.
+fn upper(s: str) -> str {
+    let mut out = ""
+    let mut i = 0
+    while i < s.len {
+        let c = str_get(s, i)
+        let u = if c >= 97 && c <= 122 { c - 32 } else { c }
+        out = out + str_from_byte(u)
+        i = i + 1
+    }
+    out
+}
+
+fn main() -> i64 {
+    match read_file("input.txt") {
+        Ok(c) => {
+            let up = upper(c)
+            if !write_file("output.txt", up) { return 1 }
+            // read the written file back and compare
+            match read_file("output.txt") {
+                Ok(back) => {
+                    if back != up { return 2 }
+                    if str_slice(back, 0, 12) != "HELLO, AURA!" { return 3 }
+                },
+                Err(e) => exit(4),
+            }
+        },
+        Err(e) => exit(5),
+    }
+    println("copy ok")
+    return 0
+}

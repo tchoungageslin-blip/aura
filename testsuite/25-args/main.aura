@@ -1,0 +1,12 @@
+// 25-args — argv: program name at [0], scenario args after.
+fn main() -> i64 {
+    let a = args()
+    // args.txt = "alpha beta gamma" -> argv = [prog, alpha, beta, gamma]
+    if a.len != 4 { return 1 }
+    if vec_get(a, 0).len == 0 { return 2 }
+    if vec_get(a, 1) != "alpha" { return 3 }
+    if vec_get(a, 2) != "beta" { return 4 }
+    if vec_get(a, 3) != "gamma" { return 5 }
+    println("args ok")
+    return 0
+}

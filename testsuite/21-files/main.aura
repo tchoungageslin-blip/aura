@@ -1,0 +1,35 @@
+// 21-files — write_file/read_file round-trip, overwrite, Err path.
+fn main() -> i64 {
+    if !write_file("out.txt", "alpha") { return 1 }
+    match read_file("out.txt") {
+        Ok(c) => {
+            if c != "alpha" { return 2 }
+        },
+        Err(e) => exit(3),
+    }
+    // overwrite truncates
+    if !write_file("out.txt", "b") { return 4 }
+    match read_file("out.txt") {
+        Ok(c) => {
+            if c != "b" { return 5 }
+        },
+        Err(e) => exit(6),
+    }
+    // binary-ish content round-trips byte-exact
+    let blob = "a\nb\t\"q\"\\"
+    if !write_file("bin.dat", blob) { return 7 }
+    match read_file("bin.dat") {
+        Ok(c) => {
+            if c != blob { return 8 }
+            if c.len != 8 { return 9 }
+        },
+        Err(e) => exit(10),
+    }
+    // missing file -> Err
+    match read_file("nope_missing.txt") {
+        Ok(c) => exit(11),
+        Err(e) => println(e),
+    }
+    println("files ok")
+    return 0
+}

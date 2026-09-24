@@ -1,0 +1,19 @@
+// 23-exec — child exit codes + file side effect via shell redirection.
+fn main() -> i64 {
+    if exec("cmd /c exit 7") != 7 { return 1 }
+    if exec("cmd /c exit 0") != 0 { return 2 }
+    if exec("cmd /c exit 42") != 42 { return 3 }
+    // spawn failure -> -1
+    if exec("no_such_program_zzz9") != 0 - 1 { return 4 }
+    // child writes a file (cmd redirection needs no std handles)
+    if exec("cmd /c echo ok>child.txt") != 0 { return 5 }
+    match read_file("child.txt") {
+        Ok(c) => {
+            if c.len < 2 { return 6 }
+            if str_slice(c, 0, 2) != "ok" { return 7 }
+        },
+        Err(e) => exit(8),
+    }
+    println("exec ok")
+    return 0
+}

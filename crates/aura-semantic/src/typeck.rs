@@ -1187,6 +1187,15 @@ fn builtin_fn_type(infer: &mut InferCtx, b: BuiltinFn) -> Type {
             params: vec![Type::Bool],
             ret: Box::new(Type::Str),
         },
+        BuiltinFn::StrFromByte => {
+            // Generic over int widths like `str_from_int` — the low 8
+            // bits become the byte.
+            let t = infer.new_var(VarKind::Int);
+            Type::Fn {
+                params: vec![t],
+                ret: Box::new(Type::Str),
+            }
+        }
         BuiltinFn::StrGet => Type::Fn {
             params: vec![Type::Str, Type::Int(IntTy::Usize)],
             ret: Box::new(Type::Int(IntTy::I64)),
@@ -1232,6 +1241,22 @@ fn builtin_fn_type(infer: &mut InferCtx, b: BuiltinFn) -> Type {
         BuiltinFn::Args => Type::Fn {
             params: Vec::new(),
             ret: Box::new(Type::Vec(Box::new(Type::Str))),
+        },
+        BuiltinFn::ReadFile => Type::Fn {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Result(Box::new(Type::Str), Box::new(Type::Str))),
+        },
+        BuiltinFn::WriteFile => Type::Fn {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Bool),
+        },
+        BuiltinFn::ReadStdin => Type::Fn {
+            params: Vec::new(),
+            ret: Box::new(Type::Str),
+        },
+        BuiltinFn::Exec => Type::Fn {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Int(IntTy::I64)),
         },
         BuiltinFn::Env => Type::Fn {
             params: vec![Type::Str],

@@ -1,0 +1,12 @@
+// 22-stdin — read_stdin drains to EOF; second call sees "".
+fn main() -> i64 {
+    let inp = read_stdin()
+    // "hello aura stdin" = 16 bytes
+    if inp.len != 16 { return 1 }
+    if str_slice(inp, 0, 5) != "hello" { return 2 }
+    // drained
+    if read_stdin().len != 0 { return 3 }
+    println(inp)
+    println("stdin ok")
+    return 0
+}

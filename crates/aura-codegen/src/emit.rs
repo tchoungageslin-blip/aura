@@ -238,8 +238,9 @@ fn declare_builtins(
                 sig.params.push(AbiParam::new(types::F64));
                 sig.returns.push(AbiParam::new(types::F64));
             }
-            // (v: i64, out: *mut {ptr,len}) — bool args uextend to i64.
-            BuiltinFn::StrFromInt | BuiltinFn::StrFromBool => {
+            // (v: i64, out: *mut {ptr,len}) — bool args uextend to i64;
+            // str_from_byte takes the low 8 bits of the same slot.
+            BuiltinFn::StrFromInt | BuiltinFn::StrFromBool | BuiltinFn::StrFromByte => {
                 sig.params
                     .extend([AbiParam::new(types::I64), AbiParam::new(ptr)]);
             }
@@ -261,11 +262,27 @@ fn declare_builtins(
                 sig.params.extend([AbiParam::new(ptr); 4]);
                 sig.returns.push(AbiParam::new(ptr));
             }
-            // (out: *mut {ptr,len,cap}) — runtime fills the vec triple
-            BuiltinFn::Args => sig.params.push(AbiParam::new(ptr)),
-            // (name_ptr, name_len, out: *mut {ptr,len})
-            BuiltinFn::Env => sig.params.extend([AbiParam::new(ptr); 3]),
-            BuiltinFn::VecNew | BuiltinFn::VecSet | BuiltinFn::VecPop => unreachable!(),
+            // (out: *mut {ptr,len,cap}) — runtime fills the vec triple /
+            // (out: *mut {ptr,len}) for read_stdin
+            BuiltinFn::Args | BuiltinFn::ReadStdin => sig.params.push(AbiParam::new(ptr)),
+            // (name_ptr, name_len, out: *mut {ptr,len}) /
+            // (path_ptr, path_len, out: *mut Result<str,str>)
+            BuiltinFn::Env | BuiltinFn::ReadFile => {
+                sig.params.extend([AbiParam::new(ptr); 3]);
+            }
+            // (path_ptr, path_len, data_ptr, data_len) -> i32 ok
+            BuiltinFn::WriteFile => {
+                sig.params.extend([AbiParam::new(ptr); 4]);
+                sig.returns.push(AbiParam::new(types::I32));
+            }
+            // (cmd_ptr, cmd_len) -> i64 exit code
+            BuiltinFn::Exec => {
+                sig.params.extend([AbiParam::new(ptr); 2]);
+                sig.returns.push(AbiParam::new(types::I64));
+            }
+            BuiltinFn::VecNew | BuiltinFn::VecSet | BuiltinFn::VecPop => {
+                unreachable!()
+            }
         }
         let id = module
             .declare_function(b.runtime_symbol(), Linkage::Import, &sig)
@@ -774,7 +791,7 @@ impl FnGen<'_, '_> {
                     self.store(dest, r);
                 }
             }
-            BuiltinFn::StrFromInt | BuiltinFn::StrFromBool => {
+            BuiltinFn::StrFromInt | BuiltinFn::StrFromBool | BuiltinFn::StrFromByte => {
                 // (v, out) — the runtime writes the `{ptr,len}` into
                 // `dest`. `str_from_int` is generic over int widths:
                 // normalize the operand to I64 (sext signed, uext
@@ -833,6 +850,52 @@ impl FnGen<'_, '_> {
                 let da = self.place_addr(dest);
                 self.call_builtin_sym(b, &[np, nl, da]);
             }
+            BuiltinFn::ReadFile | BuiltinFn::WriteFile | BuiltinFn::ReadStdin | BuiltinFn::Exec => {
+                self.file_proc_builtin(dest, b, args);
+            }
+        }
+    }
+
+    /// File/process builtins — each `str` arg flattens to `{ptr, len}`;
+    /// `read_file`/`read_stdin` write their result through `dest`'s
+    /// address, `write_file`'s `i32` becomes a `bool`, `exec`'s `i64`
+    /// stores directly.
+    fn file_proc_builtin(&mut self, dest: &Place, b: BuiltinFn, args: &[Operand]) {
+        let len_off = i32::try_from(self.ptr.bytes()).unwrap_or(i32::MAX);
+        let mut vals: Vec<Value> = Vec::new();
+        for op in args {
+            let base = self.operand_addr(op);
+            let sp = self
+                .b
+                .ins()
+                .load(self.ptr, MemFlagsData::trusted(), base, 0);
+            let sl = self
+                .b
+                .ins()
+                .load(self.ptr, MemFlagsData::trusted(), base, len_off);
+            vals.push(sp);
+            vals.push(sl);
+        }
+        match b {
+            // Result/str destinations get the out-pointer last.
+            BuiltinFn::ReadFile | BuiltinFn::ReadStdin => {
+                let da = self.place_addr(dest);
+                vals.push(da);
+                self.call_builtin_sym(b, &vals);
+            }
+            BuiltinFn::WriteFile => {
+                if let Some(r) = self.call_builtin_sym(b, &vals) {
+                    let z = self.b.ins().iconst(types::I32, 0);
+                    let t = self.b.ins().icmp(IntCC::NotEqual, r, z);
+                    self.store(dest, t);
+                }
+            }
+            BuiltinFn::Exec => {
+                if let Some(r) = self.call_builtin_sym(b, &vals) {
+                    self.store(dest, r);
+                }
+            }
+            _ => unreachable!(),
         }
     }
 

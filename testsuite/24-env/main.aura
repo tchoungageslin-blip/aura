@@ -1,0 +1,13 @@
+// 24-env — env() reads the process environment.
+fn main() -> i64 {
+    // PATH exists on every supported host
+    let p = env("PATH")
+    if p.len == 0 { return 1 }
+    // missing var -> ""
+    if env("AURA_NO_SUCH_VAR_ZZZ") != "" { return 2 }
+    // value is a real str: concat + slice work on it
+    let s = "len>10=" + str_from_bool(p.len > 10)
+    println(s)
+    println("env ok")
+    return 0
+}

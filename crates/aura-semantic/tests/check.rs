@@ -587,3 +587,32 @@ fn builtin_str_get_arg_mismatch() {
         codes::SEM_ARG_COUNT,
     );
 }
+
+#[test]
+fn builtin_file_io_clean() {
+    let src = "fn main() -> i64 { let ok: bool = write_file(\"a\", \"b\")\n match read_file(\"a\") { Ok(c) => println(c), Err(e) => println(e) }\n let inp: str = read_stdin()\n let code: i64 = exec(\"true\")\n 0 }";
+    assert!(diags(src).is_empty(), "{:?}", diags(src));
+}
+
+#[test]
+fn builtin_file_io_arg_mismatch() {
+    assert_has(
+        "fn main() -> i64 { read_file(1)\n 0 }",
+        codes::SEM_TYPE_MISMATCH,
+    );
+    assert_has(
+        "fn main() -> i64 { write_file(\"a\", 1)\n 0 }",
+        codes::SEM_TYPE_MISMATCH,
+    );
+    assert_has("fn main() -> i64 { exec()\n 0 }", codes::SEM_ARG_COUNT);
+}
+
+#[test]
+fn builtin_str_from_byte_generic_int() {
+    let src = "fn main() -> i64 { let s: str = str_from_byte(72)\n let b = str_from_byte(105)\n if s + b == \"Hi\" { 0 } else { 1 } }";
+    assert!(diags(src).is_empty(), "{:?}", diags(src));
+    assert_has(
+        "fn main() -> i64 { str_from_byte(\"a\")\n 0 }",
+        codes::SEM_TYPE_MISMATCH,
+    );
+}

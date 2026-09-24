@@ -56,6 +56,21 @@ pub enum BuiltinFn {
     Args,
     /// `env(name: str) -> str` — environment variable value or `""`.
     Env,
+    /// `read_file(path: str) -> Result<str, str>` — whole file as bytes;
+    /// `Err(msg)` when the OS refuses (missing, denied, …).
+    ReadFile,
+    /// `write_file(path: str, data: str) -> bool` — create/truncate +
+    /// write all bytes; `false` on OS failure.
+    WriteFile,
+    /// `read_stdin() -> str` — stdin to EOF as bytes.
+    ReadStdin,
+    /// `exec(cmd: str) -> i64` — spawn, wait, return the child's exit
+    /// code; `-1` when the OS can't spawn it. The child gets no stdio —
+    /// observable effects are the exit code and file system changes.
+    Exec,
+    /// `str_from_byte(b: i64) -> str` — the single-byte string for the
+    /// low 8 bits; the primitive for building bytes programmatically.
+    StrFromByte,
 }
 
 impl BuiltinFn {
@@ -78,6 +93,11 @@ impl BuiltinFn {
         Self::VecPop,
         Self::Args,
         Self::Env,
+        Self::ReadFile,
+        Self::WriteFile,
+        Self::ReadStdin,
+        Self::Exec,
+        Self::StrFromByte,
     ];
 
     /// Source-level name (`println`, `exit`, `vec_push`, …).
@@ -100,6 +120,11 @@ impl BuiltinFn {
             Self::VecPop => "vec_pop",
             Self::Args => "args",
             Self::Env => "env",
+            Self::ReadFile => "read_file",
+            Self::WriteFile => "write_file",
+            Self::ReadStdin => "read_stdin",
+            Self::Exec => "exec",
+            Self::StrFromByte => "str_from_byte",
         }
     }
 
@@ -122,6 +147,11 @@ impl BuiltinFn {
             Self::VecGet => "aura_vec_get",
             Self::Args => "aura_rt_args",
             Self::Env => "aura_rt_env",
+            Self::ReadFile => "aura_read_file",
+            Self::WriteFile => "aura_write_file",
+            Self::ReadStdin => "aura_read_stdin",
+            Self::Exec => "aura_exec",
+            Self::StrFromByte => "aura_str_from_byte",
             Self::VecNew | Self::VecSet | Self::VecPop => "",
         }
     }

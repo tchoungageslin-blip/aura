@@ -576,6 +576,29 @@ fn scenario(dir: &Path) -> Result<Scenario, String> {
     })
 }
 
+/// Unique temp dir under the OS temp root.
+fn tempdir(tag: &str) -> PathBuf {
+    let mut d = std::env::temp_dir();
+    d.push(format!("{tag}_{}", std::process::id()));
+    d
+}
+
+/// Recursive directory copy — scenario dirs are a handful of small
+/// files, so a naive read/write walk is fine.
+fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for e in std::fs::read_dir(from)? {
+        let e = e?;
+        let dst = to.join(e.file_name());
+        if e.file_type()?.is_dir() {
+            copy_dir(&e.path(), &dst)?;
+        } else {
+            std::fs::copy(e.path(), &dst)?;
+        }
+    }
+    Ok(())
+}
+
 /// `want` vs `got` — first differing line index, for failure reports.
 fn first_diff(want: &str, got: &str) -> String {
     for (i, (w, g)) in want.lines().zip(got.lines()).enumerate() {
@@ -614,11 +637,19 @@ fn run_scenario(dir: &Path) -> Result<(), String> {
         return Err("semantic errors".into());
     }
 
+    // Run inside a throwaway copy of the scenario dir — file side
+    // effects (write_file/exec children) never touch the repo.
+    let work = tempdir(&format!(
+        "aura_test_{}",
+        sc.dir.file_name().unwrap_or_default().to_string_lossy()
+    ));
+    copy_dir(&sc.dir, &work).map_err(|e| format!("scenario workdir: {e}"))?;
+
     // Compiled engine.
     let (obj_bytes, _c) = compile(&source).ok_or("compile failed")?;
     let (tmp, exe) = link_temp_exe(&obj_bytes).ok_or("link failed")?;
     let mut cmd = std::process::Command::new(&exe);
-    cmd.current_dir(&sc.dir)
+    cmd.current_dir(&work)
         .args(&sc.args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -649,7 +680,21 @@ fn run_scenario(dir: &Path) -> Result<(), String> {
     if sc.skip_interp {
         return Ok(());
     }
-    let cap = aura_interp::run_project_capture(&db, project);
+    // argv[0] is the spawned exe path compiled-side; interp uses its
+    // own — scenarios must not depend on argv[0]'s value, only its
+    // presence.
+    let mut argv = vec!["aura-scenario".to_owned()];
+    argv.extend(sc.args.iter().cloned());
+    let cap = aura_interp::run_project_capture(
+        &db,
+        project,
+        aura_interp::RunConfig {
+            stdin: Some(sc.stdin.clone()),
+            cwd: Some(work.clone()),
+            args: Some(argv),
+        },
+    );
+    let _ = std::fs::remove_dir_all(&work);
     match (&cap.result, sc.expect_interp_err) {
         (Err(_), true) => {}
         (Err(e), false) => return Err(format!("interp error: {e}")),
