@@ -844,7 +844,7 @@ impl Lowerer<'_> {
             Rvalue::Binary(
                 BinOp::Eq,
                 Operand::Place(Place::local(d)),
-                Operand::Const(Const::Int(u64::from(vi), IntTy::I32)),
+                Operand::Const(Const::Int(u128::from(vi), IntTy::I32)),
             ),
         );
         Operand::Place(Place::local(eq))

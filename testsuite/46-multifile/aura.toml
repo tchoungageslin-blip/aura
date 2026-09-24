@@ -1,0 +1,5 @@
+[package]
+name = "app46"
+
+[dependencies]
+mathlib = { path = "mathlib" }

@@ -131,7 +131,7 @@ pub enum Operand {
 /// A constant scalar.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Const {
-    Int(u64, IntTy),
+    Int(u128, IntTy),
     Float(f64, FloatTy),
     Bool(bool),
     Unit,

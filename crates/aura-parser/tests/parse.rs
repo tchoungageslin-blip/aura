@@ -41,6 +41,15 @@ fn postfix() {
 #[test]
 fn literals() {
     insta::assert_snapshot!(dump("fn f() { 0xFF + 0b11 + 1_000 }"), @"(fn f (params) (block (+ (+ 255 3) 1000)))");
+    // i128/u128-range literals keep their full value (regression: u64 storage
+    // silently clamped them to u64::MAX).
+    insta::assert_snapshot!(
+        dump("fn f() { 34028236692093846346337460743176821145 }"),
+        @"(fn f (params) (block 34028236692093846346337460743176821145))"
+    );
+    // beyond u128::MAX → E0004 diagnostic, not a silent clamp
+    let d = diags("fn f() { 340282366920938463463374607431768211456999 }");
+    assert!(d.iter().any(|m| m.contains("E0004")), "{d:?}");
     insta::assert_snapshot!(dump(r#"fn f() { "hi\n" }"#), @"(fn f (params) (block \"hi\\n\"))");
     insta::assert_snapshot!(dump("fn f() { true && false }"), @"(fn f (params) (block (&& true false)))");
     insta::assert_snapshot!(dump("fn f() { () }"), @"(fn f (params) (block ()))");

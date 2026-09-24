@@ -1,0 +1,14 @@
+// report — text formatting helpers (depends on nothing).
+fn field(k: str, v: i64) -> str {
+    k + "=" + str_from_int(v)
+}
+fn line(parts: vec<str>) -> str {
+    let mut s = ""
+    let mut i = 0
+    while i < parts.len {
+        if i > 0 { s = s + " " }
+        s = s + vec_get(parts, i)
+        i = i + 1
+    }
+    s
+}

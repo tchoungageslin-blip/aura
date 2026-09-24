@@ -1,0 +1,19 @@
+// 48-bigger — compose two dep packages: stats computes, report formats.
+fn main() -> i64 {
+    let v = vec_new()
+    let mut i = 1
+    while i <= 10 {
+        vec_push(v, i * i)
+        i = i + 1
+    }
+    // 1..10 squares: sum 385, mean 38.5, max 100
+    let parts = vec_new()
+    vec_push(parts, field("sum", sum(v)))
+    vec_push(parts, field("mean", mean100(v)))
+    vec_push(parts, field("max", vmax(v)))
+    println(line(parts))
+    if sum(v) != 385 { return 1 }
+    if mean100(v) != 3850 { return 2 }
+    println("bigger ok")
+    return 0
+}

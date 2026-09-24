@@ -1,0 +1,6 @@
+[package]
+name = "app48"
+
+[dependencies]
+stats = { path = "stats" }
+report = { path = "report" }

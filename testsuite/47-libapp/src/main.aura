@@ -1,0 +1,11 @@
+// 47-libapp — use geom's struct + enum from another package.
+fn main() -> i64 {
+    let a = Point { x: 0, y: 0 }
+    let b = Point { x: 3, y: 4 }
+    if dist2(a, b) != 25 { return 1 }
+    if area2(Rect(3, 5)) != 30 { return 2 }
+    if area2(Circle(7)) != 98 { return 3 }
+    if area2(Dot) != 0 { return 4 }
+    println("libapp ok")
+    return 0
+}

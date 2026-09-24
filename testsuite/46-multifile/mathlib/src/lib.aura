@@ -1,0 +1,12 @@
+// mathlib — a dependency package contributing src/lib.aura.
+fn square(x: i64) -> i64 { x * x }
+fn cube(x: i64) -> i64 { x * x * x }
+fn sumsq(v: vec<i64>) -> i64 {
+    let mut t = 0
+    let mut i = 0
+    while i < v.len {
+        t = t + square(vec_get(v, i))
+        i = i + 1
+    }
+    t
+}

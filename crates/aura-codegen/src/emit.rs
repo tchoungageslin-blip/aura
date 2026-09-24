@@ -1424,7 +1424,16 @@ impl FnGen<'_, '_> {
         match c {
             Const::Int(v, i) => {
                 let ty = clif_ty(&Type::Int(*i), self.ptr);
-                self.int_const(ty, (*v).cast_signed())
+                if ty == types::I128 {
+                    let lo = self.b.ins().iconst(types::I64, (*v as u64).cast_signed());
+                    let hi = self
+                        .b
+                        .ins()
+                        .iconst(types::I64, ((*v >> 64) as u64).cast_signed());
+                    self.b.ins().iconcat(lo, hi)
+                } else {
+                    self.b.ins().iconst(ty, (*v as u64).cast_signed())
+                }
             }
             Const::Float(v, FloatTy::F32) => self.b.ins().f32const(*v as f32),
             Const::Float(v, FloatTy::F64) => self.b.ins().f64const(*v),

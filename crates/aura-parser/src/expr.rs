@@ -534,7 +534,7 @@ impl Parser<'_> {
         }
     }
 
-    pub(crate) fn parse_int_lit(&self, span: Span) -> Literal {
+    pub(crate) fn parse_int_lit(&mut self, span: Span) -> Literal {
         let text: String = self.src[span.range()].replace('_', "");
         let (digits, radix) = if let Some(d) = text.strip_prefix("0x") {
             (d, 16)
@@ -545,9 +545,15 @@ impl Parser<'_> {
         } else {
             (text.as_str(), 10)
         };
-        match u64::from_str_radix(digits, radix) {
-            Ok(v) => Literal::Int(v),
-            Err(_) => Literal::Int(u64::MAX), // diag already emitted by lexer
+        if let Ok(v) = u128::from_str_radix(digits, radix) {
+            Literal::Int(v)
+        } else {
+            self.diags.error(
+                codes::LEX_INVALID_NUMBER,
+                "integer literal out of range (max `u128`)",
+                span,
+            );
+            Literal::Int(0)
         }
     }
 

@@ -1,0 +1,12 @@
+// 46-multifile — cross-package calls into mathlib's lib.aura.
+fn main() -> i64 {
+    if square(7) != 49 { return 1 }
+    if cube(4) != 64 { return 2 }
+    let v = vec_new()
+    vec_push(v, 1)
+    vec_push(v, 2)
+    vec_push(v, 3)
+    if sumsq(v) != 14 { return 3 }
+    println("multifile ok")
+    return 0
+}

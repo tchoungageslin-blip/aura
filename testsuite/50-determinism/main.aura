@@ -1,0 +1,33 @@
+// 50-determinism — the same computation twice must produce identical
+// bytes; cross-engine determinism is the harness contract itself
+// (compiled stdout must equal interp stdout byte-for-byte).
+
+fn compute(seed: i64) -> str {
+    // A multi-structure derived hash: vec churn + str building +
+    // float formatting — exercises allocator/gc-adjacent state.
+    let v = vec_new()
+    let mut s = seed
+    let mut i = 0
+    while i < 200 {
+        s = (s * 48271 + 11) % 2147483647
+        vec_push(v, s % 997)
+        i = i + 1
+    }
+    let mut h = 0
+    let mut j = 0
+    while j < v.len {
+        h = (h * 131 + vec_get(v, j)) % 1000000007
+        j = j + 1
+    }
+    let f = f64_from_int(h) / 997.0
+    "h=" + str_from_int(h) + " f=" + str_from_f64(f)
+}
+
+fn main() -> i64 {
+    let a = compute(777)
+    let b = compute(777)
+    if a != b { return 1 }
+    println(a)
+    println("determinism ok")
+    return 0
+}

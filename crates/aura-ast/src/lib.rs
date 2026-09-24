@@ -136,7 +136,7 @@ impl Ast {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Literal {
-    Int(u64),
+    Int(u128),
     Float(f64),
     Bool(bool),
     /// `()`

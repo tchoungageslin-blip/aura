@@ -15,6 +15,17 @@ fn run_err(src: &str) -> InterpError {
 }
 
 #[test]
+fn i128_literal_full_range() {
+    // Regression (testsuite/49): literals wider than u64 used to clamp
+    // silently to u64::MAX in `Literal::Int`.
+    let src = "fn main() -> i64 {\n\
+        let big: i128 = 34028236692093846346337460743176821145\n\
+        if big + big == 68056473384187692692674921486353642290 { 0 } else { 1 }\n\
+    }";
+    assert_eq!(run(src), 0);
+}
+
+#[test]
 fn arithmetic_and_return() {
     assert_eq!(run("fn main() -> i64 { 6 * 7 }"), 42);
     assert_eq!(run("fn main() -> i64 { (1 + 2) * 3 - 4 }"), 5);

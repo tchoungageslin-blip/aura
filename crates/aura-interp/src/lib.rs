@@ -852,7 +852,7 @@ impl<'a> Interp<'a> {
 
     fn literal(&self, l: &Literal) -> Value {
         match l {
-            Literal::Int(v) => Value::Int(i128::from(*v)),
+            Literal::Int(v) => Value::Int((*v).cast_signed()),
             Literal::Float(v) => Value::Float(*v),
             Literal::Bool(v) => Value::Bool(*v),
             Literal::Unit => Value::Unit,
