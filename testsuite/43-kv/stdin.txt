@@ -1,0 +1,10 @@
+SET a 1
+SET b 2
+GET a
+GET zzz
+SET a 9
+GET a
+COUNT
+DEL a
+GET a
+COUNT

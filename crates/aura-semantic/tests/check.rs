@@ -638,3 +638,23 @@ fn builtin_float_conv_arg_mismatch() {
         codes::SEM_TYPE_MISMATCH,
     );
 }
+
+#[test]
+fn else_if_chain_without_final_else() {
+    // Found by the testsuite: `else if` puts the nested if in expr
+    // position, which used to demand an else even when the branch was
+    // unit-typed. Now legal — a no-else `if` yields `()`.
+    let src =
+        "fn main() -> i64 { let mut x = 0\n if x == 1 { x = 2 } else if x == 2 { x = 3 }\n x }";
+    assert!(diags(src).is_empty(), "{:?}", diags(src));
+}
+
+#[test]
+fn else_if_value_tail_still_needs_else() {
+    // A non-unit tail in a no-else if can't produce a value on the
+    // false path — E2101 still fires.
+    assert_has(
+        "fn main() -> i64 { let mut x = 0\n if x == 1 { x = 2 } else if x == 2 { 42 }\n x }",
+        codes::SEM_IF_MISSING_ELSE,
+    );
+}

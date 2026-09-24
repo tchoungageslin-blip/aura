@@ -1,0 +1,3 @@
+Hello {{name}}!
+Your score: {{score}} ({{grade}})
+Bye, {{name}}.

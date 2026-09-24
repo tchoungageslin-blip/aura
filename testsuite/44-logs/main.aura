@@ -1,0 +1,45 @@
+// 44-logs — parse app.log, count per level, write a summary report.
+fn line_at(s: str, i: usize) -> usize {
+    let mut j = i
+    while j < s.len && str_get(s, j) != 10 {
+        j = j + 1
+    }
+    j
+}
+
+fn eq_at(s: str, i: usize, w: str) -> bool {
+    i + w.len <= s.len && str_slice(s, i, i + w.len) == w
+}
+
+fn main() -> i64 {
+    match read_file("app.log") {
+        Ok(log) => {
+            let mut info = 0
+            let mut warn = 0
+            let mut err = 0
+            let mut other = 0
+            let mut pos = 0
+            while pos < log.len {
+                let e = line_at(log, pos)
+                if e > pos {
+                    if eq_at(log, pos, "INFO") {
+                        info = info + 1
+                    } else if eq_at(log, pos, "WARN") {
+                        warn = warn + 1
+                    } else if eq_at(log, pos, "ERROR") {
+                        err = err + 1
+                    } else {
+                        other = other + 1
+                    }
+                }
+                pos = e + 1
+            }
+            let report = "INFO=" + str_from_int(info) + " WARN=" + str_from_int(warn) + " ERROR=" + str_from_int(err) + " OTHER=" + str_from_int(other) + "\n"
+            if !write_file("report.txt", report) { return 1 }
+            println(report)
+            println("logs ok")
+            return 0
+        },
+        Err(e) => exit(9),
+    }
+}

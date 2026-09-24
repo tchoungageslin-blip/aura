@@ -1,0 +1,92 @@
+// 43-kv — tiny in-memory KV store driven by stdin commands:
+//   SET key value / GET key / DEL key / COUNT
+// Keys/values are single tokens (no spaces). Output: GET -> value or
+// "(none)", COUNT -> count, SET/DEL -> "ok".
+
+fn line_at(s: str, i: usize) -> usize {
+    // index of byte 10 at-or-after i (s.len if none)
+    let mut j = i
+    while j < s.len && str_get(s, j) != 10 {
+        j = j + 1
+    }
+    j
+}
+
+fn eq_at(s: str, i: usize, w: str) -> bool {
+    i + w.len <= s.len && str_slice(s, i, i + w.len) == w
+}
+
+fn next_tok(s: str, i: usize, e: usize) -> usize {
+    // end index of token starting at i (stops at space or e)
+    let mut j = i
+    while j < e && str_get(s, j) != 32 {
+        j = j + 1
+    }
+    j
+}
+
+fn find_key(keys: vec<str>, k: str) -> usize {
+    // keys.len = not-found sentinel (like bsearch in 12)
+    let mut i = 0
+    while i < keys.len {
+        if vec_get(keys, i) == k { return i }
+        i = i + 1
+    }
+    keys.len
+}
+
+fn main() -> i64 {
+    let inp = read_stdin()
+    let keys = vec_new()
+    let vals = vec_new()
+    let mut pos = 0
+    while pos < inp.len {
+        let e = line_at(inp, pos)
+        if e > pos {
+            if eq_at(inp, pos, "SET ") {
+                let k1 = pos + 4
+                let k2 = next_tok(inp, k1, e)
+                let v1 = k2 + 1
+                if v1 <= e {
+                    let key = str_slice(inp, k1, k2)
+                    let val = str_slice(inp, v1, e)
+                    let idx = find_key(keys, key)
+                    if idx < keys.len {
+                        vec_set(vals, idx, val)
+                    } else {
+                        vec_push(keys, key)
+                        vec_push(vals, val)
+                    }
+                    println("ok")
+                }
+            } else if eq_at(inp, pos, "GET ") {
+                let key = str_slice(inp, pos + 4, e)
+                let idx = find_key(keys, key)
+                if idx < keys.len {
+                    println(vec_get(vals, idx))
+                } else {
+                    println("(none)")
+                }
+            } else if eq_at(inp, pos, "DEL ") {
+                let key = str_slice(inp, pos + 4, e)
+                let idx = find_key(keys, key)
+                if idx < keys.len {
+                    vec_set(vals, idx, "")
+                    vec_set(keys, idx, "")
+                }
+                println("ok")
+            } else if eq_at(inp, pos, "COUNT") {
+                let mut n = 0
+                let mut m = 0
+                while m < keys.len {
+                    if vec_get(keys, m).len > 0 { n = n + 1 }
+                    m = m + 1
+                }
+                println(str_from_int(n))
+            }
+        }
+        pos = e + 1
+    }
+    println("kv done")
+    return 0
+}

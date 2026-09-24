@@ -1,0 +1,10 @@
+INFO boot sequence start
+WARN disk almost full
+INFO loading modules
+ERROR driver failed
+INFO net up
+WARN retry scheduled
+ERROR timeout on device 3
+INFO ready
+WARN thermal zone high
+INFO shutdown

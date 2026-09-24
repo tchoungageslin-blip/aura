@@ -1,0 +1,63 @@
+// 45-template — substitute {{key}} placeholders from "k=v" argv pairs.
+fn eq_at(s: str, i: usize, w: str) -> bool {
+    i + w.len <= s.len && str_slice(s, i, i + w.len) == w
+}
+
+fn lookup(a: vec<str>, key: str) -> str {
+    // a = [prog, "k1=v1", "k2=v2", ...]
+    let mut i = 1
+    while i < a.len {
+        let kv = vec_get(a, i)
+        // find '=' in kv
+        let mut j = 0
+        while j < kv.len {
+            if str_get(kv, j) == 61 {
+                if str_slice(kv, 0, j) == key {
+                    return str_slice(kv, j + 1, kv.len)
+                }
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+    "??" + key + "??"
+}
+
+fn main() -> i64 {
+    match read_file("tpl.txt") {
+        Ok(tpl) => {
+            let a = args()
+            let mut out = ""
+            let mut i = 0
+            while i < tpl.len {
+                if eq_at(tpl, i, "{{") {
+                    // find "}}"
+                    let mut j = i + 2
+                    let mut found = false
+                    while j + 1 < tpl.len {
+                        if str_get(tpl, j) == 125 && str_get(tpl, j + 1) == 125 {
+                            found = true
+                            break
+                        }
+                        j = j + 1
+                    }
+                    if found {
+                        let key = str_slice(tpl, i + 2, j)
+                        out = out + lookup(a, key)
+                        i = j + 2
+                    } else {
+                        out = out + str_from_byte(str_get(tpl, i))
+                        i = i + 1
+                    }
+                } else {
+                    out = out + str_from_byte(str_get(tpl, i))
+                    i = i + 1
+                }
+            }
+            println(out)
+            println("tpl ok")
+            return 0
+        },
+        Err(e) => exit(9),
+    }
+}

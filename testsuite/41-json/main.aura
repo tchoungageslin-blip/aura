@@ -1,0 +1,154 @@
+// 41-json — recursive-descent JSON validator + top-level member
+// counter. Byte-level: str_get over the document. Failures propagate
+// as positions > s.len (valid parse ends land <= s.len).
+
+struct ObjRes { pos: usize, n: usize }
+
+fn is_ws(b: i64) -> bool {
+    b == 32 || b == 9 || b == 10 || b == 13
+}
+
+fn is_digit(b: i64) -> bool {
+    b >= 48 && b <= 57
+}
+
+fn skip_ws(s: str, i: usize) -> usize {
+    let mut j = i
+    while j < s.len && is_ws(str_get(s, j)) {
+        j = j + 1
+    }
+    j
+}
+
+// returns pos after the literal, or s.len+1
+fn lit(s: str, i: usize, w: str) -> usize {
+    if i + w.len > s.len { return s.len + 1 }
+    if str_slice(s, i, i + w.len) != w { return s.len + 1 }
+    i + w.len
+}
+
+fn parse_string(s: str, i: usize) -> usize {
+    // i points at the opening quote
+    let mut j = i + 1
+    while j < s.len {
+        let b = str_get(s, j)
+        if b == 34 { return j + 1 }          // closing "
+        if b == 92 {                         // backslash escape
+            j = j + 1
+            if j >= s.len { return s.len + 1 }
+        }
+        j = j + 1
+    }
+    s.len + 1
+}
+
+fn parse_number(s: str, i: usize) -> usize {
+    let mut j = i
+    if j < s.len && str_get(s, j) == 45 { j = j + 1 }   // '-'
+    if j >= s.len || !is_digit(str_get(s, j)) { return s.len + 1 }
+    while j < s.len && is_digit(str_get(s, j)) { j = j + 1 }
+    // fraction
+    if j < s.len && str_get(s, j) == 46 {
+        j = j + 1
+        if j >= s.len || !is_digit(str_get(s, j)) { return s.len + 1 }
+        while j < s.len && is_digit(str_get(s, j)) { j = j + 1 }
+    }
+    // exponent
+    if j < s.len && (str_get(s, j) == 101 || str_get(s, j) == 69) {
+        j = j + 1
+        if j < s.len && (str_get(s, j) == 43 || str_get(s, j) == 45) { j = j + 1 }
+        if j >= s.len || !is_digit(str_get(s, j)) { return s.len + 1 }
+        while j < s.len && is_digit(str_get(s, j)) { j = j + 1 }
+    }
+    j
+}
+
+fn parse_value(s: str, i: usize) -> usize {
+    let j = skip_ws(s, i)
+    if j >= s.len { return s.len + 1 }
+    let b = str_get(s, j)
+    if b == 34 { return parse_string(s, j) }           // '"'
+    if b == 45 || is_digit(b) { return parse_number(s, j) }
+    if b == 123 { return parse_object(s, j).pos }      // '{'
+    if b == 91 { return parse_array(s, j) }            // '['
+    if b == 116 { return lit(s, j, "true") }           // 't'
+    if b == 102 { return lit(s, j, "false") }          // 'f'
+    if b == 110 { return lit(s, j, "null") }           // 'n'
+    s.len + 1
+}
+
+fn parse_array(s: str, i: usize) -> usize {
+    // i at '['
+    let mut j = skip_ws(s, i + 1)
+    if j < s.len && str_get(s, j) == 93 { return j + 1 }  // empty []
+    let mut first = true
+    while j < s.len {
+        j = parse_value(s, j)
+        if j > s.len { return j }
+        j = skip_ws(s, j)
+        if j >= s.len { return s.len + 1 }
+        let b = str_get(s, j)
+        if b == 44 {                                    // ','
+            j = skip_ws(s, j + 1)
+        } else if b == 93 {                             // ']'
+            return j + 1
+        } else {
+            return s.len + 1
+        }
+        first = false
+    }
+    s.len + 1
+}
+
+fn parse_object(s: str, i: usize) -> ObjRes {
+    // i at '{'
+    let mut n = 0
+    let mut j = skip_ws(s, i + 1)
+    if j < s.len && str_get(s, j) == 125 {
+        return ObjRes { pos: j + 1, n: 0 }              // empty {}
+    }
+    while j < s.len {
+        // key
+        if str_get(s, j) != 34 { return ObjRes { pos: s.len + 1, n: 0 } }
+        j = parse_string(s, j)
+        if j > s.len { return ObjRes { pos: j, n: 0 } }
+        j = skip_ws(s, j)
+        if j >= s.len || str_get(s, j) != 58 {          // ':'
+            return ObjRes { pos: s.len + 1, n: 0 }
+        }
+        j = parse_value(s, j + 1)
+        if j > s.len { return ObjRes { pos: j, n: 0 } }
+        n = n + 1
+        j = skip_ws(s, j)
+        if j >= s.len { return ObjRes { pos: s.len + 1, n: 0 } }
+        let b = str_get(s, j)
+        if b == 44 {                                    // ','
+            j = skip_ws(s, j + 1)
+        } else if b == 125 {                            // '}'
+            return ObjRes { pos: j + 1, n: n }
+        } else {
+            return ObjRes { pos: s.len + 1, n: 0 }
+        }
+    }
+    ObjRes { pos: s.len + 1, n: 0 }
+}
+
+fn main() -> i64 {
+    match read_file("data.json") {
+        Ok(doc) => {
+            let end = parse_value(doc, 0)
+            // trailing ws allowed
+            if skip_ws(doc, end) != doc.len { return 1 }
+            // count top-level members with a dedicated pass
+            let r = parse_object(doc, skip_ws(doc, 0))
+            println("members=" + str_from_int(r.n))
+            // negative: a broken doc must fail
+            let bad = "{\"a\": [1,2]"
+            let e2 = parse_value(bad, 0)
+            if e2 <= bad.len { return 2 }
+            println("json ok")
+            return 0
+        },
+        Err(e) => exit(9),
+    }
+}

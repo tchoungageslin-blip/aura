@@ -669,18 +669,23 @@ impl Checker<'_> {
                 then_ty
             }
             None => {
-                // Value-less `if` is fine only in statement position; the
-                // block's own tail must be unit-shaped — enforce by
-                // unifying with Unit only when the arm has a tail value.
-                if self.body.ast.block(then_block).tail.is_some() {
+                // A no-else `if` always yields `()` — so it's legal
+                // anywhere the then-branch can't produce a missing
+                // value: unit-typed tails (`x = 1`, `()`), diverging
+                // tails (`break`, `return`, `exit(n)` — `Never`), and
+                // `Error` (already reported; don't pile on). That
+                // makes `else if` chains and `if c { break }` work in
+                // expr position. A *concrete value* tail with no
+                // `else` is the real E2101.
+                if matches!(then_ty, Type::Unit | Type::Error | Type::Never) {
+                    Type::Unit
+                } else {
                     self.err(
                         codes::SEM_IF_MISSING_ELSE,
                         "`if` with a value requires an `else` branch",
                         self.span(id),
                     );
                     Type::Error
-                } else {
-                    Type::Unit
                 }
             }
         }
