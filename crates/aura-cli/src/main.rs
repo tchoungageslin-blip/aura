@@ -124,7 +124,10 @@ const DOC_PAGES: &[(&str, &str)] = &[
         "getting-started",
         include_str!("../../../docs/src/getting-started.md"),
     ),
-    ("demarrage", include_str!("../../../docs/src/fr/demarrage.md")),
+    (
+        "demarrage",
+        include_str!("../../../docs/src/fr/demarrage.md"),
+    ),
     ("language", include_str!("../../../docs/src/language.md")),
     ("toolchain", include_str!("../../../docs/src/toolchain.md")),
     ("stdlib", include_str!("../../../docs/src/stdlib.md")),
