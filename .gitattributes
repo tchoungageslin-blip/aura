@@ -1,0 +1,8 @@
+# Normalize text files in the index regardless of platform.
+* text=auto
+
+# The validation suite is byte-exact: scenario inputs (stdin.txt,
+# args.txt, configs) and expected outputs must check out with LF
+# endings on every platform, or programs that parse stdin byte-wise
+# (e.g. 43-kv) see a trailing \r in tokens.
+testsuite/** text eol=lf
