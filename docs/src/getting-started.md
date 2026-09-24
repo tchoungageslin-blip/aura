@@ -42,19 +42,6 @@ hello/
 ## The 60-second tour
 
 ```aura
-// variables — inferred, immutable by default
-let name = "world"
-let mut count = 0        // `mut` makes it assignable
-count = count + 1
-
-// types: i64 i32 u8 usize f64 bool str vec<T> Result<T,E>
-let pi: f64 = 3.14159
-let scores = vec_new()   // vec<?T> — inferred from first push
-
-// control flow — `if` is an expression
-let label = if count > 0 { "yes" } else { "no" }
-while count < 10 { count = count + 1 }
-
 // functions
 fn square(x: i64) -> i64 { x * x }
 
@@ -64,8 +51,23 @@ fn might_fail(ok: bool) -> Result<i64, str> {
 }
 
 fn main() -> i64 {
+    // variables — inferred, immutable by default
+    let name = "world"
+    let mut count = 0                      // `mut` makes it assignable
+    count = count + 1
+
+    // types: i64 i32 u8 usize f64 bool str vec<T> Result<T,E>
+    let pi: f64 = 3.14159
+    let scores = vec_new()                 // vec<i64> — inferred…
+    vec_push(scores, 7)                    // …from this push
+
+    // control flow — `if` is an expression
+    let label = if count > 0 { "yes" } else { "no" }
+    while count < 10 { count = count + 1 }
+
     println("hello " + name)               // string concat
     println(str_from_int(square(7)))       // int → str
+    println(str_from_int(vec_get(scores, 0)))
     match might_fail(true) {
         Ok(v) => println(str_from_int(v)),
         Err(e) => eprintln(e),

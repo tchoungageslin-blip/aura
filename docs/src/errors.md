@@ -143,11 +143,12 @@ to be resolved first.
 The inferred type doesn't match the expected one.
 
 ```aura,fail
-fn f() -> i64 { "hello" }
+fn main() -> i64 { let x: i64 = "hello" }
 ```
 
 **Fix:** make the types agree; `str` doesn't auto-convert to numbers —
-use `str_from_int`/`f64_from_int` the other way.
+use `str_from_int`/`f64_from_int` the other way. (Return-position
+mismatches get the more specific E2107.)
 
 ### E2101 — `if` used as a value requires `else`
 An `if` in expression position whose branches produce a value must be
@@ -238,7 +239,8 @@ A construct reached codegen that the backend can't emit yet.
 `main` must be `fn main() -> i64` (no parameters).
 
 ```aura,fail
-fn main() { 0 }
+fn main() -> str { "x" }
 ```
 
-**Fix:** declare `fn main() -> i64 { ... }`.
+**Fix:** declare `fn main() -> i64 { ... }`. (A missing `-> i64` is
+already caught earlier as E2107; E3005 is the codegen backstop.)

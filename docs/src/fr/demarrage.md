@@ -44,19 +44,6 @@ hello/
 ## Le tour en 60 secondes
 
 ```aura
-// variables — inférées, immuables par défaut
-let name = "world"
-let mut count = 0        // `mut` rend assignable
-count = count + 1
-
-// types : i64 i32 u8 usize f64 bool str vec<T> Result<T,E>
-let pi: f64 = 3.14159
-let scores = vec_new()   // vec<?T> — inféré au premier push
-
-// contrôle — `if` est une expression
-let label = if count > 0 { "oui" } else { "non" }
-while count < 10 { count = count + 1 }
-
 // fonctions
 fn square(x: i64) -> i64 { x * x }
 
@@ -66,8 +53,23 @@ fn might_fail(ok: bool) -> Result<i64, str> {
 }
 
 fn main() -> i64 {
+    // variables — inférées, immuables par défaut
+    let name = "world"
+    let mut count = 0                      // `mut` rend assignable
+    count = count + 1
+
+    // types : i64 i32 u8 usize f64 bool str vec<T> Result<T,E>
+    let pi: f64 = 3.14159
+    let scores = vec_new()                 // vec<i64> — inféré…
+    vec_push(scores, 7)                    // …depuis ce push
+
+    // contrôle — `if` est une expression
+    let label = if count > 0 { "oui" } else { "non" }
+    while count < 10 { count = count + 1 }
+
     println("hello " + name)               // concaténation
     println(str_from_int(square(7)))       // int → str
+    println(str_from_int(vec_get(scores, 0)))
     match might_fail(true) {
         Ok(v) => println(str_from_int(v)),
         Err(e) => eprintln(e),
