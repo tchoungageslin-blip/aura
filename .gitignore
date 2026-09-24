@@ -18,3 +18,7 @@ build/
 dist/
 *.pending-snap
 *.exe
+
+# VS Code extension build artifacts
+editors/vscode/node_modules/
+*.vsix

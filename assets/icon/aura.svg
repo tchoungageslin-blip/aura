@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- Aura mark: a solid geometric "A". Outer silhouette with the
+       counter (hole) carved out via even-odd fill; the black band
+       between counter bottom and crossbar top forms the crossbar. -->
+  <path fill="#000" fill-rule="evenodd"
+        d="M116 24 h24 L224 232 h-44 L164 188 H92 L76 232 H32 Z
+           M128 88 L156 148 H100 Z"/>
+</svg>

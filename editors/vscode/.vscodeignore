@@ -1,0 +1,7 @@
+# dev-only files excluded from the vsix
+.vscode/
+*.map
+*.ts
+tsconfig.json
+node_modules/**/test/
+node_modules/**/tests/
