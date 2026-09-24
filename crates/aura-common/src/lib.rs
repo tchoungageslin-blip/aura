@@ -35,6 +35,12 @@ pub enum BuiltinFn {
     StrFromInt,
     /// `str_from_bool(v: bool) -> str` — `"true"`/`"false"`.
     StrFromBool,
+    /// `str_get(s: str, i: usize) -> i64` — bounds-checked byte load;
+    /// widened like C's `getchar` (Aura has no int casts yet).
+    StrGet,
+    /// `str_slice(s: str, lo: usize, hi: usize) -> str` — bounds-checked
+    /// `{ptr+lo, hi-lo}` view into the same buffer (no copy).
+    StrSlice,
     /// `vec_new<T>() -> vec<T>` — empty `{ptr: 0, len: 0, cap: 0}`.
     VecNew,
     /// `vec_push<T>(v: vec<T>, x: T)` — grow + append in place.
@@ -43,6 +49,9 @@ pub enum BuiltinFn {
     VecGet,
     /// `vec_set<T>(v: vec<T>, i: usize, x: T)` — bounds-checked store.
     VecSet,
+    /// `vec_pop<T>(v: vec<T>) -> T` — remove + return the last element;
+    /// exit 101 on empty (same trap as `vec_get` OOB).
+    VecPop,
     /// `args() -> vec<str>` — process command line, program name first.
     Args,
     /// `env(name: str) -> str` — environment variable value or `""`.
@@ -60,10 +69,13 @@ impl BuiltinFn {
         Self::Sqrt,
         Self::StrFromInt,
         Self::StrFromBool,
+        Self::StrGet,
+        Self::StrSlice,
         Self::VecNew,
         Self::VecPush,
         Self::VecGet,
         Self::VecSet,
+        Self::VecPop,
         Self::Args,
         Self::Env,
     ];
@@ -79,10 +91,13 @@ impl BuiltinFn {
             Self::Sqrt => "sqrt",
             Self::StrFromInt => "str_from_int",
             Self::StrFromBool => "str_from_bool",
+            Self::StrGet => "str_get",
+            Self::StrSlice => "str_slice",
             Self::VecNew => "vec_new",
             Self::VecPush => "vec_push",
             Self::VecGet => "vec_get",
             Self::VecSet => "vec_set",
+            Self::VecPop => "vec_pop",
             Self::Args => "args",
             Self::Env => "env",
         }
@@ -101,11 +116,13 @@ impl BuiltinFn {
             Self::Sqrt => "sqrt",
             Self::StrFromInt => "aura_str_from_int",
             Self::StrFromBool => "aura_str_from_bool",
+            Self::StrGet => "aura_str_get",
+            Self::StrSlice => "aura_str_slice",
             Self::VecPush => "aura_vec_push",
             Self::VecGet => "aura_vec_get",
             Self::Args => "aura_rt_args",
             Self::Env => "aura_rt_env",
-            Self::VecNew | Self::VecSet => "",
+            Self::VecNew | Self::VecSet | Self::VecPop => "",
         }
     }
 

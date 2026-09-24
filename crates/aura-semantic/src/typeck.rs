@@ -1187,6 +1187,14 @@ fn builtin_fn_type(infer: &mut InferCtx, b: BuiltinFn) -> Type {
             params: vec![Type::Bool],
             ret: Box::new(Type::Str),
         },
+        BuiltinFn::StrGet => Type::Fn {
+            params: vec![Type::Str, Type::Int(IntTy::Usize)],
+            ret: Box::new(Type::Int(IntTy::I64)),
+        },
+        BuiltinFn::StrSlice => Type::Fn {
+            params: vec![Type::Str, Type::Int(IntTy::Usize), Type::Int(IntTy::Usize)],
+            ret: Box::new(Type::Str),
+        },
         BuiltinFn::VecNew => {
             let t = infer.new_var(VarKind::Any);
             Type::Fn {
@@ -1211,6 +1219,13 @@ fn builtin_fn_type(infer: &mut InferCtx, b: BuiltinFn) -> Type {
             let t = infer.new_var(VarKind::Any);
             Type::Fn {
                 params: vec![Type::Vec(Box::new(t.clone())), Type::Int(IntTy::Usize)],
+                ret: Box::new(t),
+            }
+        }
+        BuiltinFn::VecPop => {
+            let t = infer.new_var(VarKind::Any);
+            Type::Fn {
+                params: vec![Type::Vec(Box::new(t.clone()))],
                 ret: Box::new(t),
             }
         }

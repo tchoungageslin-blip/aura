@@ -30,7 +30,9 @@ pub enum Value {
     Bool(bool),
     /// `Rc` shares the backing buffer across clones — `s.ptr` is stable
     /// for the same value, matching the compiled `{ptr, len}` repr.
-    Str(Rc<str>),
+    /// Bytes, not `str`: `str_slice` may split a UTF-8 boundary and
+    /// `read_file` reads arbitrary bytes — the compiled repr is bytes.
+    Str(Rc<[u8]>),
     /// `vec<T>` — `Rc<RefCell>` matches the compiled `{ptr, len, cap}`
     /// buffer: `vec_push`/`vec_set` mutate through shared references.
     Vec(Rc<RefCell<Vec<Value>>>),
@@ -330,10 +332,13 @@ enum Builtin {
     VecPush,
     VecGet,
     VecSet,
+    VecPop,
     Args,
     Env,
     StrFromInt,
     StrFromBool,
+    StrGet,
+    StrSlice,
 }
 
 /// The interpreter: item tables plus a scope stack and fuel.
@@ -747,7 +752,7 @@ impl<'a> Interp<'a> {
             Literal::Float(v) => Value::Float(*v),
             Literal::Bool(v) => Value::Bool(*v),
             Literal::Unit => Value::Unit,
-            Literal::Str(s) => Value::Str(Rc::from(self.name_of(*s))),
+            Literal::Str(s) => Value::Str(Rc::from(self.name_of(*s).into_bytes())),
         }
     }
 
@@ -789,7 +794,10 @@ impl<'a> Interp<'a> {
             (BinOp::Div, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_div(*b))),
             (BinOp::Rem, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_rem(*b))),
             (BinOp::Add, Value::Str(a), Value::Str(b)) => {
-                Ok(Value::Str(Rc::from(format!("{a}{b}"))))
+                let mut buf = Vec::with_capacity(a.len() + b.len());
+                buf.extend_from_slice(a);
+                buf.extend_from_slice(b);
+                Ok(Value::Str(Rc::from(buf)))
             }
             (BinOp::Add, Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
             (BinOp::Sub, Value::Float(a), Value::Float(b)) => Ok(Value::Float(a - b)),
@@ -963,6 +971,9 @@ impl Builtin {
             "env" => Some(Self::Env),
             "str_from_int" => Some(Self::StrFromInt),
             "str_from_bool" => Some(Self::StrFromBool),
+            "str_get" => Some(Self::StrGet),
+            "str_slice" => Some(Self::StrSlice),
+            "vec_pop" => Some(Self::VecPop),
             _ => None,
         }
     }
@@ -974,9 +985,9 @@ impl Builtin {
         err: &mut dyn std::io::Write,
     ) -> Result<Value, InterpError> {
         use std::io::Write;
-        let mut write = |stderr: bool, s: &str, nl: bool| {
+        let mut write = |stderr: bool, s: &[u8], nl: bool| {
             let w: &mut dyn Write = if stderr { &mut *err } else { &mut *out };
-            let _ = w.write_all(s.as_bytes());
+            let _ = w.write_all(s);
             if nl {
                 let _ = w.write_all(b"\n");
             }
@@ -1010,33 +1021,60 @@ impl Builtin {
             }
             (Self::VecGet, [Value::Vec(v), Value::Int(i)]) => {
                 let i = usize::try_from(*i).unwrap_or(usize::MAX);
+                // Compiled OOB is ExitProcess(101) — match it.
                 v.borrow()
                     .get(i)
                     .cloned()
-                    .ok_or_else(|| InterpError::Type("vec index out of bounds".into()))
+                    .ok_or(InterpError::Escape(Escape::Exit(101)))
             }
             (Self::VecSet, [Value::Vec(v), Value::Int(i), x]) => {
                 let i = usize::try_from(*i).unwrap_or(usize::MAX);
                 let mut b = v.borrow_mut();
-                let slot = b
-                    .get_mut(i)
-                    .ok_or_else(|| InterpError::Type("vec index out of bounds".into()))?;
+                let Some(slot) = b.get_mut(i) else {
+                    return Err(InterpError::Escape(Escape::Exit(101)));
+                };
                 *slot = x.clone();
                 Ok(Value::Unit)
             }
+            (Self::VecPop, [Value::Vec(v)]) => {
+                // Empty pop: compiled `vec_get(len-1)` wraps to
+                // usize::MAX → exit 101 — match it.
+                v.borrow_mut()
+                    .pop()
+                    .ok_or(InterpError::Escape(Escape::Exit(101)))
+            }
             (Self::Args, []) => Ok(Value::Vec(Rc::new(RefCell::new(
                 std::env::args()
-                    .map(|a| Value::Str(Rc::from(a.as_str())))
+                    .map(|a| Value::Str(Rc::from(a.into_bytes())))
                     .collect(),
             )))),
             (Self::Env, [Value::Str(name)]) => Ok(Value::Str(Rc::from(
-                std::env::var(name.as_ref()).unwrap_or_default().as_str(),
+                std::env::var(std::str::from_utf8(name).unwrap_or_default())
+                    .unwrap_or_default()
+                    .into_bytes(),
             ))),
             (Self::StrFromInt, [Value::Int(v)]) => {
-                Ok(Value::Str(Rc::from(format!("{v}").as_str())))
+                Ok(Value::Str(Rc::from(format!("{v}").into_bytes())))
             }
-            (Self::StrFromBool, [Value::Bool(b)]) => {
-                Ok(Value::Str(Rc::from(if *b { "true" } else { "false" })))
+            (Self::StrFromBool, [Value::Bool(b)]) => Ok(Value::Str(Rc::from(if *b {
+                b"true".as_slice()
+            } else {
+                b"false".as_slice()
+            }))),
+            (Self::StrGet, [Value::Str(s), Value::Int(i)]) => {
+                let i = usize::try_from(*i).unwrap_or(usize::MAX);
+                // Compiled OOB is ExitProcess(101) — match it.
+                s.get(i)
+                    .map(|&b| Value::Int(i128::from(b)))
+                    .ok_or(InterpError::Escape(Escape::Exit(101)))
+            }
+            (Self::StrSlice, [Value::Str(s), Value::Int(lo), Value::Int(hi)]) => {
+                let lo = usize::try_from(*lo).unwrap_or(usize::MAX);
+                let hi = usize::try_from(*hi).unwrap_or(usize::MAX);
+                if lo > hi || hi > s.len() {
+                    return Err(InterpError::Escape(Escape::Exit(101)));
+                }
+                Ok(Value::Str(Rc::from(&s[lo..hi])))
             }
             _ => Err(InterpError::Type("bad builtin args".into())),
         }

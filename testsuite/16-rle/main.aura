@@ -1,0 +1,25 @@
+// 16-rle — run-length encode: "aaabbbbc" -> "a3b4c1".
+fn rle(s: str) -> str {
+    let mut out = ""
+    let mut i = 0
+    while i < s.len {
+        let c = str_get(s, i)
+        let mut n = 0
+        while i < s.len && str_get(s, i) == c {
+            n = n + 1
+            i = i + 1
+        }
+        out = out + str_slice(s, i - n, i - n + 1) + str_from_int(n)
+    }
+    out
+}
+
+fn main() -> i64 {
+    if rle("aaabbbbc") != "a3b4c1" { return 1 }
+    if rle("") != "" { return 2 }
+    if rle("x") != "x1" { return 3 }
+    if rle("aaaaaaaaaa") != "a10" { return 4 }
+    println(rle("wwwwaaadexxxxxx"))
+    println("rle ok")
+    return 0
+}

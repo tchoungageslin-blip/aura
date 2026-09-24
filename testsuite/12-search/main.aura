@@ -1,0 +1,30 @@
+// 12-search — binary search over a sorted vec<i64>; usize sentinel.
+// Returns the index, or v.len when absent (no i64/usize casts exist).
+fn bsearch(v: vec<i64>, x: i64) -> usize {
+    let mut lo = 0
+    let mut hi = v.len
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2
+        let m = vec_get(v, mid)
+        if m == x { return mid }
+        if m < x { lo = mid + 1 } else { hi = mid }
+    }
+    v.len
+}
+
+fn main() -> i64 {
+    let v = vec_new()
+    let mut i = 0
+    while i < 100 {
+        vec_push(v, i * 3)
+        i = i + 1
+    }
+    // 297 = 99*3 must be found at index 99
+    if bsearch(v, 297) != 99 { return 1 }
+    if bsearch(v, 0) != 0 { return 2 }
+    if bsearch(v, 298) != v.len { return 3 }
+    if bsearch(v, 0 - 5) != v.len { return 4 }
+    if bsearch(v, 300) != v.len { return 5 }
+    println("search ok")
+    return 0
+}

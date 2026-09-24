@@ -209,6 +209,38 @@ fn str_match_pattern() {
 }
 
 #[test]
+fn str_get_and_slice() {
+    assert_eq!(
+        run(
+            "fn main() -> i64 { let s = \"hello world\"\n let w = str_slice(s, 6, 11)\n if str_get(s, 6) == 119 && w == \"world\" && str_slice(s, 0, 0).len == 0 { 5 } else { 0 } }"
+        ),
+        5
+    );
+}
+
+#[test]
+fn str_get_oob_exits_101() {
+    // Compiled `aura_str_get` OOB is ExitProcess(101) — parity.
+    assert_eq!(
+        run("fn main() -> i64 { let s = \"abc\"\n let b = str_get(s, 9)\n 0 }"),
+        101
+    );
+    assert_eq!(
+        run("fn main() -> i64 { println(str_slice(\"abc\", 3, 2))\n 0 }"),
+        101
+    );
+}
+
+#[test]
+fn vec_oob_exits_101() {
+    // Same compiled trap for `vec_get`/`vec_set` OOB.
+    assert_eq!(
+        run("fn main() -> i64 { let v = vec_new()\n vec_push(v, 1)\n vec_get(v, 7) }"),
+        101
+    );
+}
+
+#[test]
 fn str_ptr_is_opaque_int() {
     assert_eq!(
         run("fn main() -> i64 { let s = \"x\"\n if s.ptr == s.ptr { 2 } else { 0 } }"),
@@ -257,8 +289,9 @@ fn vec_in_struct_field_and_param() {
 
 #[test]
 fn vec_oob_is_error() {
+    // Compiled `aura_vec_get` OOB is ExitProcess(101) — interp matches.
     let src = "fn main() -> i64 { let v = vec_new()\n vec_push(v, 1)\n vec_get(v, 5) }";
-    assert!(matches!(run_err(src), InterpError::Type(_)));
+    assert_eq!(run(src), 101);
 }
 
 #[test]

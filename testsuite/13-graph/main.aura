@@ -1,0 +1,46 @@
+// 13-graph — BFS on a flat adjacency matrix (5 nodes).
+fn main() -> i64 {
+    // 0->1, 0->2, 1->3, 2->3, 3->4
+    let adj = vec_new()
+    let mut i = 0
+    while i < 25 {
+        vec_push(adj, 0)
+        i = i + 1
+    }
+    vec_set(adj, 0 * 5 + 1, 1)
+    vec_set(adj, 0 * 5 + 2, 1)
+    vec_set(adj, 1 * 5 + 3, 1)
+    vec_set(adj, 2 * 5 + 3, 1)
+    vec_set(adj, 3 * 5 + 4, 1)
+    // BFS from 0: visit order 0,1,2,3,4
+    let seen = vec_new()
+    let queue = vec_new()
+    i = 0
+    while i < 5 {
+        vec_push(seen, 0)
+        i = i + 1
+    }
+    vec_push(queue, 0)
+    vec_set(seen, 0, 1)
+    let mut head = 0
+    let mut order = 0
+    let mut visits = 0
+    while head < queue.len {
+        let u = vec_get(queue, head)
+        head = head + 1
+        order = order * 10 + u
+        visits = visits + 1
+        let mut w = 0
+        while w < 5 {
+            if vec_get(adj, u * 5 + w) == 1 && vec_get(seen, w) == 0 {
+                vec_set(seen, w, 1)
+                vec_push(queue, w)
+            }
+            w = w + 1
+        }
+    }
+    if visits != 5 { return 1 }
+    if order != 1234 { return 2 }
+    println("graph ok")
+    return 0
+}

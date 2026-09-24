@@ -1,0 +1,41 @@
+// 11-sort — bubble sort vec<i64>, verify order + checksum.
+fn bubble(v: vec<i64>) {
+    let n = v.len
+    let mut i = 0
+    while i < n {
+        let mut j = 0
+        while j + 1 < n - i {
+            if vec_get(v, j) > vec_get(v, j + 1) {
+                let t = vec_get(v, j)
+                vec_set(v, j, vec_get(v, j + 1))
+                vec_set(v, j + 1, t)
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+}
+
+fn main() -> i64 {
+    let v = vec_new()
+    vec_push(v, 5)
+    vec_push(v, 1)
+    vec_push(v, 4)
+    vec_push(v, 1)
+    vec_push(v, 5)
+    vec_push(v, 9)
+    vec_push(v, 2)
+    vec_push(v, 6)
+    bubble(v)
+    // expect 1 1 2 4 5 5 6 9 — sum 33
+    let mut sum = 0
+    let mut i = 0
+    while i < v.len {
+        if i > 0 && vec_get(v, i) < vec_get(v, i - 1) { return 1 }
+        sum = sum + vec_get(v, i)
+        i = i + 1
+    }
+    if sum != 33 { return 2 }
+    println("sort ok")
+    return 0
+}

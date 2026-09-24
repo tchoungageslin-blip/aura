@@ -532,6 +532,52 @@ pub unsafe extern "C" fn aura_str_concat(
     buf
 }
 
+/// Bounds-checked byte load: `str_get(s, i)` — exit 101 when
+/// `idx >= len` (same trap as `aura_vec_get`).
+///
+/// # Safety
+/// `ptr` must be valid for `len` bytes (or null when `len` is zero —
+/// the bounds check fires before any dereference).
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_str_get(ptr: *const u8, len: usize, idx: usize) -> u8 {
+    if idx >= len {
+        unsafe { ExitProcess(101) };
+    }
+    unsafe { *ptr.add(idx) }
+}
+
+/// Bounds-checked substring view: `str_slice(s, lo, hi)` writes
+/// `{ptr + lo, hi - lo}` at `out` — no copy, the slice borrows the
+/// source buffer (Aura's heap never frees). Exits 101 when
+/// `lo > hi` or `hi > len`.
+///
+/// # Safety
+/// `ptr` must be valid for `len` bytes; `out` must be writable for a
+/// `RawStr`.
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn aura_str_slice(
+    ptr: *const u8,
+    len: usize,
+    lo: usize,
+    hi: usize,
+    out: *mut RawStr,
+) {
+    if lo > hi || hi > len {
+        unsafe { ExitProcess(101) };
+    }
+    if out.is_null() {
+        return;
+    }
+    unsafe {
+        *out = RawStr {
+            ptr: ptr.add(lo).cast_mut(),
+            len: hi - lo,
+        }
+    };
+}
+
 // ----- vec ---------------------------------------------------------------------
 
 /// Append `elem` (`esize` bytes at `elem`) to a `vec`'s buffer,

@@ -243,6 +243,14 @@ fn declare_builtins(
                 sig.params
                     .extend([AbiParam::new(types::I64), AbiParam::new(ptr)]);
             }
+            // (ptr, len, idx) -> u8 — bounds-checked byte load.
+            BuiltinFn::StrGet => {
+                sig.params.extend([AbiParam::new(ptr); 3]);
+                sig.returns.push(AbiParam::new(types::I8));
+            }
+            // (ptr, len, lo, hi, out: *mut {ptr,len}) — bounds-checked
+            // view into the same buffer; no copy.
+            BuiltinFn::StrSlice => sig.params.extend([AbiParam::new(ptr); 5]),
             // (data, len, cap, elem_ptr, elem_size, cap_out) -> data'
             BuiltinFn::VecPush => {
                 sig.params.extend([AbiParam::new(ptr); 6]);
@@ -257,7 +265,7 @@ fn declare_builtins(
             BuiltinFn::Args => sig.params.push(AbiParam::new(ptr)),
             // (name_ptr, name_len, out: *mut {ptr,len})
             BuiltinFn::Env => sig.params.extend([AbiParam::new(ptr); 3]),
-            BuiltinFn::VecNew | BuiltinFn::VecSet => unreachable!(),
+            BuiltinFn::VecNew | BuiltinFn::VecSet | BuiltinFn::VecPop => unreachable!(),
         }
         let id = module
             .declare_function(b.runtime_symbol(), Linkage::Import, &sig)
@@ -787,6 +795,7 @@ impl FnGen<'_, '_> {
                 let da = self.place_addr(dest);
                 self.call_builtin_sym(b, &[v, da]);
             }
+            BuiltinFn::StrGet | BuiltinFn::StrSlice => self.str_get_slice(dest, b, args),
             BuiltinFn::VecNew => {
                 // `vec<T>` = `{ptr: 0, len: 0, cap: 0}` — an unallocated
                 // buffer; `vec_push` allocates on first use.
@@ -800,6 +809,7 @@ impl FnGen<'_, '_> {
             BuiltinFn::VecPush => self.vec_push(args),
             BuiltinFn::VecGet => self.vec_get_elem(dest, args),
             BuiltinFn::VecSet => self.vec_set(args),
+            BuiltinFn::VecPop => self.vec_pop(dest, args),
             BuiltinFn::Args => {
                 // `aura_rt_args(out)` — the runtime writes the whole
                 // `{ptr,len,cap}` vec<str> triple into `dest`.
@@ -920,30 +930,23 @@ impl FnGen<'_, '_> {
 
     /// `aura_vec_get(data, len, idx, esize) -> elem_ptr` — bounds-checks
     /// in the runtime (exit 101 on OOB) and returns the element address.
-    fn vec_elem_ptr(&mut self, v: &Operand, i: &Operand) -> Option<Value> {
+    /// `iv` is the index as a clif value (pointer-width).
+    fn vec_elem_ptr_at(&mut self, v: &Operand, iv: Value) -> Option<Value> {
         let ps = i32::try_from(self.ptr.bytes()).unwrap_or(i32::MAX);
         let ety = self.vec_elem_ty(v)?;
         let esize = self.elem_size(&ety);
         let va = self.operand_addr(v);
         let data = self.b.ins().load(self.ptr, MemFlagsData::trusted(), va, 0);
         let len = self.b.ins().load(self.ptr, MemFlagsData::trusted(), va, ps);
-        let iv = self.operand_val(i);
         let esz = self.b.ins().iconst(self.ptr, i64::from(esize));
         self.call_builtin_sym(BuiltinFn::VecGet, &[data, len, iv, esz])
     }
 
-    /// `vec_get(v, i) -> T` — scalar elements load from the returned
-    /// pointer; aggregates copy `esize` bytes into the destination.
-    fn vec_get_elem(&mut self, dest: &Place, args: &[Operand]) {
-        let [v, i] = args else { return };
-        let Some(ety) = self.vec_elem_ty(v) else {
-            return;
-        };
-        let Some(ep) = self.vec_elem_ptr(v, i) else {
-            return;
-        };
-        if is_aggregate(&ety) {
-            let size = self.elem_size(&ety);
+    /// Load/copy the element at `ep` into `dest` — scalar load or an
+    /// `esize`-byte aggregate copy.
+    fn vec_load_elem(&mut self, dest: &Place, ety: &Type, ep: Value) {
+        if is_aggregate(ety) {
+            let size = self.elem_size(ety);
             let align8 = u8::try_from(self.ptr.bytes()).unwrap_or(u8::MAX);
             let da = self.place_addr(dest);
             self.b.emit_small_memory_copy(
@@ -957,10 +960,78 @@ impl FnGen<'_, '_> {
                 MemFlagsData::trusted(),
             );
         } else {
-            let ct = clif_ty(&ety, self.ptr);
+            let ct = clif_ty(ety, self.ptr);
             let x = self.b.ins().load(ct, MemFlagsData::trusted(), ep, 0);
             self.store(dest, x);
         }
+    }
+
+    /// `vec_get(v, i) -> T` — scalar elements load from the returned
+    /// pointer; aggregates copy `esize` bytes into the destination.
+    fn vec_get_elem(&mut self, dest: &Place, args: &[Operand]) {
+        let [v, i] = args else { return };
+        let Some(ety) = self.vec_elem_ty(v) else {
+            return;
+        };
+        let iv = self.operand_val(i);
+        let Some(ep) = self.vec_elem_ptr_at(v, iv) else {
+            return;
+        };
+        self.vec_load_elem(dest, &ety, ep);
+    }
+
+    /// `str_get`/`str_slice` — both take the `str` payload as
+    /// `{ptr, len}` plus usize args; `str_get` returns a byte widened
+    /// to `i64`, `str_slice` writes the `{ptr+lo, hi-lo}` view into
+    /// `dest`.
+    fn str_get_slice(&mut self, dest: &Place, b: BuiltinFn, args: &[Operand]) {
+        let Some(op) = args.first() else { return };
+        let len_off = i32::try_from(self.ptr.bytes()).unwrap_or(i32::MAX);
+        let base = self.operand_addr(op);
+        let sp = self
+            .b
+            .ins()
+            .load(self.ptr, MemFlagsData::trusted(), base, 0);
+        let sl = self
+            .b
+            .ins()
+            .load(self.ptr, MemFlagsData::trusted(), base, len_off);
+        match b {
+            BuiltinFn::StrGet => {
+                let iv = self.operand_val(&args[1]);
+                if let Some(r) = self.call_builtin_sym(b, &[sp, sl, iv]) {
+                    let w = self.b.ins().uextend(types::I64, r);
+                    self.store(dest, w);
+                }
+            }
+            BuiltinFn::StrSlice => {
+                let lo = self.operand_val(&args[1]);
+                let hi = self.operand_val(&args[2]);
+                let da = self.place_addr(dest);
+                self.call_builtin_sym(b, &[sp, sl, lo, hi, da]);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    /// `vec_pop(v) -> T` — `aura_vec_get` bounds-checks `len - 1`
+    /// (wraps to `usize::MAX` on empty → exit 101), then `v.len`
+    /// decrements in place. The element bytes are returned by value.
+    fn vec_pop(&mut self, dest: &Place, args: &[Operand]) {
+        let [v] = args else { return };
+        let Some(ety) = self.vec_elem_ty(v) else {
+            return;
+        };
+        let ps = i32::try_from(self.ptr.bytes()).unwrap_or(i32::MAX);
+        let va = self.operand_addr(v);
+        let len = self.b.ins().load(self.ptr, MemFlagsData::trusted(), va, ps);
+        let one = self.b.ins().iconst(self.ptr, 1);
+        let last = self.b.ins().isub(len, one);
+        let Some(ep) = self.vec_elem_ptr_at(v, last) else {
+            return;
+        };
+        self.vec_load_elem(dest, &ety, ep);
+        self.b.ins().store(MemFlagsData::trusted(), last, va, ps);
     }
 
     /// `vec_set(v, i, x)` — bounds-checked element pointer, then an
@@ -970,7 +1041,8 @@ impl FnGen<'_, '_> {
         let Some(ety) = self.vec_elem_ty(v) else {
             return;
         };
-        let Some(ep) = self.vec_elem_ptr(v, i) else {
+        let iv = self.operand_val(i);
+        let Some(ep) = self.vec_elem_ptr_at(v, iv) else {
             return;
         };
         let xa = self.elem_addr(x, &ety);

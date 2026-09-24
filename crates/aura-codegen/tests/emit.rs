@@ -245,3 +245,19 @@ fn str_from_int_imports_aura_str_from_int() {
         "object must import aura_str_from_int"
     );
 }
+
+#[test]
+fn str_get_slice_import_runtime() {
+    let out = compile(
+        "fn main() -> i64 { let s = \"abc\"\n let b = str_get(s, 1)\n let t = str_slice(s, 0, 2)\n if b == 98 && t == \"ab\" { 0 } else { 1 } }",
+    );
+    assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
+    let obj = out.object.expect("object expected");
+    for sym in [b"aura_str_get".as_slice(), b"aura_str_slice".as_slice()] {
+        assert!(
+            obj.windows(sym.len()).any(|w| w == sym),
+            "object must import {}",
+            String::from_utf8_lossy(sym)
+        );
+    }
+}

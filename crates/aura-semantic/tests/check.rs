@@ -565,3 +565,25 @@ fn builtin_str_from_int_arg_mismatch() {
         codes::SEM_TYPE_MISMATCH,
     );
 }
+
+#[test]
+fn builtin_str_get_slice_clean() {
+    let src = "fn main() -> i64 { let s = \"abc\"\n let b: i64 = str_get(s, 0)\n let t: str = str_slice(s, 0, 2)\n if b == 97 && t == \"ab\" { 0 } else { 1 } }";
+    assert!(diags(src).is_empty(), "{:?}", diags(src));
+}
+
+#[test]
+fn builtin_str_get_arg_mismatch() {
+    assert_has(
+        "fn main() -> i64 { str_get(\"abc\", true)\n 0 }",
+        codes::SEM_TYPE_MISMATCH,
+    );
+    assert_has(
+        "fn main() -> i64 { str_get(1, 0)\n 0 }",
+        codes::SEM_TYPE_MISMATCH,
+    );
+    assert_has(
+        "fn main() -> i64 { str_slice(\"abc\", 0)\n 0 }",
+        codes::SEM_ARG_COUNT,
+    );
+}

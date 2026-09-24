@@ -1,0 +1,46 @@
+// 17-parseint — decimal parser: bytes -> i64, with error on non-digit.
+fn parse(s: str) -> Result<i64, str> {
+    if s.len == 0 { return Err("empty") }
+    let mut v = 0
+    let mut i = 0
+    let neg = str_get(s, 0) == 45
+    if neg {
+        if s.len == 1 { return Err("bare minus") }
+        i = 1
+    }
+    while i < s.len {
+        let c = str_get(s, i)
+        if c < 48 || c > 57 { return Err("non-digit") }
+        v = v * 10 + (c - 48)
+        i = i + 1
+    }
+    if neg { v = 0 - v }
+    Ok(v)
+}
+
+fn main() -> i64 {
+    match parse("12345") {
+        Ok(v) => {
+            if v != 12345 { return 1 }
+        },
+        Err(e) => exit(2),
+    }
+    match parse("-987") {
+        Ok(v) => {
+            if v != 0 - 987 { return 3 }
+        },
+        Err(e) => exit(4),
+    }
+    match parse("12x") {
+        Ok(v) => exit(5),
+        Err(e) => {
+            if e != "non-digit" { return 6 }
+        },
+    }
+    match parse("-") {
+        Ok(v) => exit(7),
+        Err(e) => 0,
+    }
+    println("parseint ok")
+    return 0
+}

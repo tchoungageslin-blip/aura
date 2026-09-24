@@ -1,0 +1,39 @@
+// 14-stack — vec as a stack: vec_push/vec_pop, RPN eval over bytes.
+// "8 5 + 7 *" digit form "85+7*" → (8+5)*7 = 91.
+fn rpn(src: str) -> i64 {
+    let st = vec_new()
+    let mut i = 0
+    while i < src.len {
+        let c = str_get(src, i)
+        if c >= 48 && c <= 57 {
+            vec_push(st, c - 48)
+        } else {
+            let b = vec_pop(st)
+            let a = vec_pop(st)
+            if c == 43 {
+                vec_push(st, a + b)
+            } else {
+                vec_push(st, a * b)
+            }
+        }
+        i = i + 1
+    }
+    vec_pop(st)
+}
+
+fn main() -> i64 {
+    if rpn("85+7*") != 91 { return 1 }
+    if rpn("12+") != 3 { return 2 }
+    if rpn("9") != 9 { return 3 }
+    if rpn("34*56*+") != 42 { return 4 }
+    // pop empties the stack — len shrinks
+    let v = vec_new()
+    vec_push(v, 1)
+    vec_push(v, 2)
+    if vec_pop(v) != 2 { return 5 }
+    if v.len != 1 { return 6 }
+    if vec_pop(v) != 1 { return 7 }
+    if v.len != 0 { return 8 }
+    println("stack ok")
+    return 0
+}

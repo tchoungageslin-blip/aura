@@ -1,0 +1,40 @@
+// 15-dedup — count distinct values via sort + adjacent scan.
+fn sort(v: vec<i64>) {
+    let n = v.len
+    let mut i = 0
+    while i < n {
+        let mut j = i + 1
+        while j < n {
+            if vec_get(v, j) < vec_get(v, i) {
+                let t = vec_get(v, i)
+                vec_set(v, i, vec_get(v, j))
+                vec_set(v, j, t)
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+}
+
+fn main() -> i64 {
+    let v = vec_new()
+    // distinct: {1,3,5,7,9} = 5
+    let src = "9357115937"
+    let mut i = 0
+    while i < src.len {
+        vec_push(v, str_get(src, i) - 48)
+        i = i + 1
+    }
+    sort(v)
+    let mut distinct = 0
+    i = 0
+    while i < v.len {
+        if i == 0 || vec_get(v, i) != vec_get(v, i - 1) {
+            distinct = distinct + 1
+        }
+        i = i + 1
+    }
+    if distinct != 5 { return 1 }
+    println("dedup ok")
+    return 0
+}
