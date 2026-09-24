@@ -306,7 +306,7 @@ pub fn default_linker() -> Result<Box<dyn LinkerDriver>, LinkError> {
         if let Some(l) = Ld::find() {
             return Ok(Box::new(l));
         }
-        return Err(LinkError::NotFound("mold or ld on PATH".into()));
+        Err(LinkError::NotFound("mold or ld on PATH".into()))
     }
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {

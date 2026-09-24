@@ -165,14 +165,8 @@ async fn run() -> async_lsp::Result<()> {
             .service(router(client))
     });
 
-    // True async stdio is a signal-driven pipe on Unix; elsewhere fall back to
-    // blocking stdio behind the compat adapter.
-    #[cfg(unix)]
-    let (stdin, stdout) = (
-        async_lsp::stdio::PipeStdin::lock_tokio().map_err(async_lsp::Error::Io)?,
-        async_lsp::stdio::PipeStdout::lock_tokio().map_err(async_lsp::Error::Io)?,
-    );
-    #[cfg(not(unix))]
+    // Blocking stdio behind the compat adapter works on every platform;
+    // async-lsp's signal-driven PipeStdin would need its `tokio` feature.
     let (stdin, stdout) = (
         tokio_util::compat::TokioAsyncReadCompatExt::compat(tokio::io::stdin()),
         tokio_util::compat::TokioAsyncWriteCompatExt::compat_write(tokio::io::stdout()),

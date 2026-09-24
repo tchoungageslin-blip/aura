@@ -2,6 +2,11 @@
 //! into aura.exe via the SDK resource compiler. No-op on other OSes.
 
 fn main() {
+    embed_icon();
+}
+
+#[cfg(windows)]
+fn embed_icon() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
         && let embed_resource::CompilationResult::Failed(e) =
             embed_resource::compile("icon.rc", embed_resource::NONE)
@@ -9,3 +14,6 @@ fn main() {
         panic!("failed to embed icon: {e} (need rc.exe / llvm-rc)")
     }
 }
+
+#[cfg(not(windows))]
+fn embed_icon() {}
