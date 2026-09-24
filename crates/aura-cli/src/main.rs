@@ -34,6 +34,11 @@ enum Command {
     Parse { path: Option<PathBuf> },
     /// Lower a file to MIR and print it (debugging).
     Mir { path: Option<PathBuf> },
+    /// Scaffold a new Aura project (aura.toml + src/main.aura).
+    New {
+        /// Project/directory name to create.
+        name: PathBuf,
+    },
     /// Compile and link a file or project into an executable.
     Build {
         path: Option<PathBuf>,
@@ -82,6 +87,7 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     let or_cwd = |p: Option<PathBuf>| p.unwrap_or_else(|| PathBuf::from("."));
     match cli.command {
+        Command::New { name } => new(&name),
         Command::Check { path } => check(&or_cwd(path)),
         Command::Parse { path } => parse(&or_cwd(path)),
         Command::Mir { path } => mir(&or_cwd(path)),
@@ -97,6 +103,47 @@ fn main() -> ExitCode {
             stdout,
         } => fmt(&or_cwd(path), check, stdout),
     }
+}
+
+/// `aura new <name>` — scaffold `name/aura.toml` + `name/src/main.aura`.
+fn new(name: &Path) -> ExitCode {
+    let dir = name;
+    let pkg = dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default();
+    let valid = !pkg.is_empty()
+        && pkg
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        && pkg.chars().next().is_some_and(|c| c.is_ascii_alphabetic());
+    if !valid {
+        eprintln!("error: invalid package name `{pkg}` (letters, digits, `_`, `-`; must start with a letter)");
+        return ExitCode::from(1);
+    }
+    if dir.exists() && dir.read_dir().is_ok_and(|mut d| d.next().is_some()) {
+        eprintln!("error: {} exists and is not empty", dir.display());
+        return ExitCode::from(1);
+    }
+    let src = dir.join("src");
+    if let Err(e) = std::fs::create_dir_all(&src) {
+        eprintln!("error: cannot create {}: {e}", src.display());
+        return ExitCode::from(1);
+    }
+    let manifest = format!("[package]\nname = \"{pkg}\"\n");
+    let main = "fn main() -> i64 {\n    println(\"Hello, Aura!\")\n    return 0\n}\n";
+    for (path, contents) in [
+        (dir.join("aura.toml"), manifest.as_str()),
+        (src.join("main.aura"), main),
+        (dir.join(".gitignore"), "build/\n"),
+    ] {
+        if let Err(e) = std::fs::write(&path, contents) {
+            eprintln!("error: cannot write {}: {e}", path.display());
+            return ExitCode::from(1);
+        }
+    }
+    println!("created `{pkg}` — cd {} && aura run", dir.display());
+    ExitCode::SUCCESS
 }
 
 /// Resolve `path` (a `.aura` file, a directory containing `aura.toml`, or

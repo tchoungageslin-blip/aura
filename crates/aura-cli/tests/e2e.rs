@@ -486,6 +486,37 @@ fn run_nbody_returns_0() {
 }
 
 #[test]
+fn new_scaffolds_runnable_project() {
+    // `aura new` must produce a project `aura run` accepts out of the box.
+    let dir = std::env::temp_dir().join(format!("aura-e2e-new-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = Command::new(AURA)
+        .args(["new", "demo"])
+        .current_dir(&dir)
+        .output()
+        .expect("spawn aura");
+    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(dir.join("demo/aura.toml").is_file());
+    assert!(dir.join("demo/src/main.aura").is_file());
+    // Second `new` into a non-empty dir refuses.
+    let again = Command::new(AURA)
+        .args(["new", "demo"])
+        .current_dir(&dir)
+        .output()
+        .expect("spawn aura");
+    assert_eq!(again.status.code(), Some(1));
+    // The scaffold interprets cleanly (no linker needed).
+    let run = Command::new(AURA)
+        .args(["run"])
+        .current_dir(dir.join("demo"))
+        .output()
+        .expect("spawn aura");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(run.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&run.stderr));
+    assert!(String::from_utf8_lossy(&run.stdout).contains("Hello, Aura!"));
+}
+
+#[test]
 fn bench_smoke_compiled_and_interp() {
     // `aura bench` must time both engines and confirm parity.
     if runtime_lib().is_none() {
