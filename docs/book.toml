@@ -5,5 +5,5 @@ language = "en"
 src = "src"
 
 [output.html]
-git-repository-url = "https://github.com/aura-lang/aura"
-edit-url-template = "https://github.com/aura-lang/aura/edit/master/docs/{path}"
+git-repository-url = "https://github.com/tchoungageslin-blip/aura"
+edit-url-template = "https://github.com/tchoungageslin-blip/aura/edit/master/docs/{path}"

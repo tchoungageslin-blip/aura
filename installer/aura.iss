@@ -16,7 +16,7 @@
 
 #define AppName "Aura"
 #define AppPublisher "Aura contributors"
-#define AppURL "https://aura-lang.github.io/aura"
+#define AppURL "https://tchoungageslin-blip.github.io/aura"
 #define AppExe "aura.exe"
 
 [Setup]

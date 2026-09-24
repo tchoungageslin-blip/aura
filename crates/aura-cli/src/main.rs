@@ -201,9 +201,14 @@ fn docs() -> ExitCode {
             }
         }
     }
-    println!("Docs: https://aura-lang.github.io/aura — or `aura doc <topic>` offline.");
+    println!("Docs: https://tchoungageslin-blip.github.io/aura — or `aura doc <topic>` offline.");
     let _ = std::process::Command::new("cmd")
-        .args(["/c", "start", "", "https://aura-lang.github.io/aura"])
+        .args([
+            "/c",
+            "start",
+            "",
+            "https://tchoungageslin-blip.github.io/aura",
+        ])
         .spawn();
     ExitCode::SUCCESS
 }

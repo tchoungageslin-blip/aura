@@ -8,7 +8,7 @@
   "icon": "icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/aura-lang/aura"
+    "url": "https://github.com/tchoungageslin-blip/aura"
   },
   "engines": {
     "vscode": "^1.85.0"

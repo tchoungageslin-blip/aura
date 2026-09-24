@@ -104,7 +104,7 @@ compiler - run:</p>
 <pre><code>aura doc           # list topics
 aura doc stdlib    # standard library reference
 aura doc E2101     # one error code</code></pre>
-<p>Or read <a href="https://github.com/aura-lang/aura/tree/master/docs/src">docs/src on GitHub</a>.</p>
+<p>Or read <a href="https://github.com/tchoungageslin-blip/aura/tree/master/docs/src">docs/src on GitHub</a>.</p>
 </article></body></html>
 '@
     Set-Content "$docsOut/index.html" $fallback -Encoding UTF8
