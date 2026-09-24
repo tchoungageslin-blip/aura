@@ -1,0 +1,41 @@
+// 40-sci-iterate — fixed-point + Newton convergence, iteration counts.
+fn main() -> i64 {
+    // Newton for x^3 - x - 2 = 0, root ~1.5213797068
+    let mut x = 1.5
+    let mut it = 0
+    let mut delta = 1.0
+    while delta > 1e-12 {
+        let fx = x * x * x - x - 2.0
+        let dfx = 3.0 * x * x - 1.0
+        let nx = x - fx / dfx
+        delta = if nx > x { nx - x } else { x - nx }
+        x = nx
+        it = it + 1
+    }
+    println(str_from_f64(x))
+    println(str_from_int(it))
+    // fixed point of cos: x = cos(x) — Taylor cos
+    let mut c = 0.5
+    let mut it2 = 0
+    while it2 < 200 {
+        c = cos_t(c)
+        it2 = it2 + 1
+    }
+    println(str_from_f64(c))
+    println("iterate ok")
+    return 0
+}
+
+fn cos_t(x: f64) -> f64 {
+    // Taylor cos(x), 10 terms
+    let mut s = 1.0
+    let mut t = 1.0
+    let mut k = 1
+    let x2 = x * x
+    while k < 10 {
+        t = (0.0 - t) * x2 / f64_from_int((2 * k - 1) * (2 * k))
+        s = s + t
+        k = k + 1
+    }
+    s
+}

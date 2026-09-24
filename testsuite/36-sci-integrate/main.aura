@@ -1,0 +1,52 @@
+// 36-sci-integrate — Simpson's rule for int_0^pi sin(x) = 2 and
+// int_0^1 4/(1+x^2) = pi.
+fn sin(x: f64) -> f64 {
+    // Taylor series, 12 terms — plenty for [0, pi]
+    let mut t = x
+    let mut s = x
+    let mut k = 1
+    let x2 = x * x
+    while k < 12 {
+        t = (0.0 - t) * x2 / f64_from_int((2 * k + 1) * (2 * k))
+        s = s + t
+        k = k + 1
+    }
+    s
+}
+
+fn simpson_sin(n: i64) -> f64 {
+    let h = 3.14159265358979 / f64_from_int(n)
+    let mut s = sin(0.0) + sin(3.14159265358979)
+    let mut i = 1
+    while i < n {
+        let x = f64_from_int(i) * h
+        let w = if i % 2 == 1 { 4.0 } else { 2.0 }
+        s = s + w * sin(x)
+        i = i + 1
+    }
+    s * h / 3.0
+}
+
+fn f(x: f64) -> f64 {
+    4.0 / (1.0 + x * x)
+}
+
+fn simpson_f(n: i64) -> f64 {
+    let h = 1.0 / f64_from_int(n)
+    let mut s = f(0.0) + f(1.0)
+    let mut i = 1
+    while i < n {
+        let x = f64_from_int(i) * h
+        let w = if i % 2 == 1 { 4.0 } else { 2.0 }
+        s = s + w * f(x)
+        i = i + 1
+    }
+    s * h / 3.0
+}
+
+fn main() -> i64 {
+    println(str_from_f64(simpson_sin(1000)))
+    println(str_from_f64(simpson_f(1000)))
+    println("integrate ok")
+    return 0
+}

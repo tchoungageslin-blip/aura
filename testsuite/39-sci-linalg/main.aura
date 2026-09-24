@@ -1,0 +1,66 @@
+// 39-sci-linalg — Gaussian elimination solves a 4x4 system.
+// A x = b -> x printed with %.6f.
+fn mat_at(m: vec<f64>, r: usize, c: usize, n: usize) -> f64 {
+    vec_get(m, r * n + c)
+}
+
+fn main() -> i64 {
+    let n = 4
+    // Diagonally dominant matrix -> no pivoting needed
+    let a = vec_new()
+    let mut i = 0
+    while i < n * n {
+        let r = i / n
+        let cc = i % n
+        let v = if r == cc { 10.0 } else { f64_from_int((i * 3 + 1) % 5) }
+        vec_push(a, v)
+        i = i + 1
+    }
+    let b = vec_new()
+    vec_push(b, 1.0)
+    vec_push(b, 2.0)
+    vec_push(b, 3.0)
+    vec_push(b, 4.0)
+    // forward elimination
+    let mut col = 0
+    while col < n {
+        let piv = mat_at(a, col, col, n)
+        let mut r = col + 1
+        while r < n {
+            let fctr = mat_at(a, r, col, n) / piv
+            let mut cc = col
+            while cc < n {
+                vec_set(a, r * n + cc, mat_at(a, r, cc, n) - fctr * mat_at(a, col, cc, n))
+                cc = cc + 1
+            }
+            vec_set(b, r, vec_get(b, r) - fctr * vec_get(b, col))
+            r = r + 1
+        }
+        col = col + 1
+    }
+    // back substitution
+    let x = vec_new()
+    let mut k = 0
+    while k < n {
+        vec_push(x, 0.0)
+        k = k + 1
+    }
+    let mut r = n
+    while r > 0 {
+        r = r - 1
+        let mut acc = vec_get(b, r)
+        let mut cc = r + 1
+        while cc < n {
+            acc = acc - mat_at(a, r, cc, n) * vec_get(x, cc)
+            cc = cc + 1
+        }
+        vec_set(x, r, acc / mat_at(a, r, r, n))
+    }
+    let mut p = 0
+    while p < n {
+        println(str_from_f64(vec_get(x, p)))
+        p = p + 1
+    }
+    println("linalg ok")
+    return 0
+}

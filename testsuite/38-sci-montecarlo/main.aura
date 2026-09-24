@@ -1,0 +1,23 @@
+// 38-sci-montecarlo — estimate pi by sampling unit-square points.
+fn main() -> i64 {
+    // LCG in [0,1): x = s/2^31
+    let mut s = 999983
+    let mut inside = 0
+    let n = 50000
+    let mut i = 0
+    while i < n {
+        s = (s * 48271 + 11) % 2147483647
+        let x = f64_from_int(s) / 2147483647.0
+        s = (s * 48271 + 11) % 2147483647
+        let y = f64_from_int(s) / 2147483647.0
+        if x * x + y * y <= 1.0 {
+            inside = inside + 1
+        }
+        i = i + 1
+    }
+    let pi_est = 4.0 * f64_from_int(inside) / f64_from_int(n)
+    println(str_from_int(inside))
+    println(str_from_f64(pi_est))
+    println("mc ok")
+    return 0
+}
